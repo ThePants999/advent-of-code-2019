@@ -1,9 +1,13 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::process;
 use std::sync::mpsc::channel;
 use std::thread;
 
 use intcode;
-//#[macro_use] extern crate itertools;
 
 fn main() {
     let memory = intcode::load_program("day17/input.txt").unwrap_or_else(|err| {

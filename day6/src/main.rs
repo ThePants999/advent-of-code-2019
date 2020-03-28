@@ -62,6 +62,7 @@ pub struct OrbitalObject {
 }
 
 impl OrbitalObject {
+    #[must_use]
     pub fn new(name: String) -> Self {
         Self {
             name,
@@ -71,7 +72,7 @@ impl OrbitalObject {
         }
     }
 
-    /// Links parent and child OrbitalObjects together (bidirectionally).
+    /// Links parent and child `OrbitalObject`s together (bidirectionally).
     ///
     /// # Examples
     ///
@@ -117,6 +118,7 @@ impl OrbitalObject {
     /// let ancestor = OrbitalObject::find_common_ancestor(&child_one, &child_two);
     /// assert_eq!(ancestor, parent);
     /// ```
+    #[must_use]
     pub fn find_common_ancestor(
         first: &Rc<RefCell<Self>>,
         second: &Rc<RefCell<Self>>,
@@ -150,9 +152,13 @@ impl OrbitalObject {
     }
 }
 
-/// Loads a definition of orbits from file and constructs a tree of OrbitalObjects from them, plus
-/// a map indexed by name.OrbitalObject.  Returns an error if the file cannot be found or loaded,
+/// Loads a definition of orbits from file and constructs a tree of `OrbitalObject`s from them, plus
+/// a map indexed by `OrbitalObject.name`.  Returns an error if the file cannot be found or loaded,
 /// or if its contents are invalid.
+/// 
+/// # Errors
+/// 
+/// Returns an `io::Error` for any issues reading `source_file`, including invalid contents.
 pub fn load_orbits(
     source_file: &str,
 ) -> Result<HashMap<String, Rc<RefCell<OrbitalObject>>>, io::Error> {
@@ -187,13 +193,12 @@ fn get_orbital_object(
     map: &mut HashMap<String, Rc<RefCell<OrbitalObject>>>,
     name: &str,
 ) -> Rc<RefCell<OrbitalObject>> {
-    match map.get(name) {
-        Some(rc) => rc.clone(),
-        None => {
-            let obj = OrbitalObject::new(String::from(name));
-            let rc = Rc::new(RefCell::new(obj));
-            map.insert(String::from(name), rc.clone());
-            rc
-        }
+    if let Some(rc) = map.get(name) {
+        rc.clone()
+    } else {
+        let obj = OrbitalObject::new(String::from(name));
+        let rc = Rc::new(RefCell::new(obj));
+        map.insert(String::from(name), rc.clone());
+        rc
     }
 }

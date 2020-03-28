@@ -1,3 +1,8 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::io;
 use std::io::Read;
 use std::fs::File;
@@ -5,8 +10,8 @@ use std::process;
 
 use std::collections::VecDeque;
 
-const DECK_SIZE: i128 = 119315717514047;
-const NUM_SHUFFLES: i128 = 101741582076661;
+const DECK_SIZE: i128 = 119_315_717_514_047;
+const NUM_SHUFFLES: i128 = 101_741_582_076_661;
 
 // All hail https://codeforces.com/blog/entry/72593, without which I would never
 // have been able to do this.
@@ -104,7 +109,7 @@ fn _apply_technique(mut deck: Vec<u32>, technique: &Techniques) -> Vec<u32> {
 }
 
 #[allow(dead_code)]
-fn cut_deck(deck: &Vec<u32>, count: usize) -> Vec<u32> {
+fn cut_deck(deck: &[u32], count: usize) -> Vec<u32> {
     let mut new_deck = deck[count..].to_vec();
     new_deck.extend_from_slice(&deck[..count]);
     new_deck
@@ -135,7 +140,7 @@ fn load_instructions() -> Result<Vec<Techniques>, io::Error> {
     Ok(techniques)
 }
 
-fn _find_card(deck: &Vec<u32>, card: u32) -> Option<usize> {
+fn _find_card(deck: &[u32], card: u32) -> Option<usize> {
     for (index, deck_card) in deck.iter().enumerate() {
         if *deck_card == card { return Some(index); }
     }

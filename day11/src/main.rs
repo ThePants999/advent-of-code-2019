@@ -62,6 +62,7 @@ fn main() {
     println!("{}", picture);
 }
 
+#[derive(Clone,Copy)]
 enum Turns {
     Left,
     Right,
@@ -159,7 +160,7 @@ impl Robot {
 
     fn get_color_at(&self, x: isize, y: isize) -> i64 {
         let coordinates = format!("({}, {})", x, y);
-        self.panels.get(&coordinates).map(|panel| panel.color).unwrap_or(0)
+        self.panels.get(&coordinates).map_or(0, |panel| panel.color)
     }
 }
 

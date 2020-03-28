@@ -60,7 +60,7 @@ fn main() {
     println!("Repeated message to 255: {}, {}", message.x, message.y);
 }
 
-#[derive(Clone)]
+#[derive(Clone,Copy)]
 struct Message {
     destination: i64,
     x: i64,
@@ -73,7 +73,7 @@ struct Computer {
 }
 
 impl Computer {
-    fn new(memory: &Vec<i64>, address: i64) -> Self {
+    fn new(memory: &[i64], address: i64) -> Self {
         //let (network_send, network_recv) = channel();
         let (in_send, in_recv) = channel();
         let (out_send, out_recv) = channel();
@@ -107,13 +107,12 @@ impl Computer {
         self.tx.send(-1).unwrap();
 
         match self.rx.try_recv() {
-            Ok(-1) => None,
+            Ok(-1) | Err(_  )=> None,
             Ok(dest) => Some(Message{
                 destination: dest,
                 x: self.rx.recv().unwrap(),
                 y: self.rx.recv().unwrap(),
             }),
-            Err(_) => None,
         }
     }
 

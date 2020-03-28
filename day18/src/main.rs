@@ -1,3 +1,8 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::fmt;
 
 use std::collections::{HashSet, VecDeque};
@@ -9,17 +14,7 @@ type Maze = [[char; HEIGHT]; WIDTH];
 const DIRS_X: [isize; 4] = [0, 1, 0, -1];
 const DIRS_Y: [isize; 4] = [-1, 0, 1, 0];
 
-fn main() {
-    let input = String::from(
-// "#############
-// #g#f.D#..h#l#
-// #F###e#E###.#
-// #dCba@#@BcIJ#
-// #############
-// #nK.L@#@G...#
-// #M###N#H###.#
-// #o#m..#i#jk.#
-// #############");
+const INPUT: &str = 
 "#################################################################################
 #.....#.#...#...........Z...........#...#.......#...#...........#.........#.....#
 #.###.#.#.#.#.###########.#########.###.#.#####.#.#.#.#.#######.#####.###.#.###.#
@@ -100,7 +95,10 @@ fn main() {
 #.#.#...#.#.....#...#.........#...#.....#.#.....#.....#...#...#.#.#.....#...#...#
 #.#######.###########.#######.###.#####.#.#######.#####.#####.###.#####.#.###.###
 #.....................#...........#.....#...............#.........#....t..#.....#
-#################################################################################");
+#################################################################################";
+
+fn main() {
+    let input = String::from(INPUT);
 
     let mut maze: Maze = [['!'; HEIGHT]; WIDTH];
     let mut all_keys = HashSet::new();
@@ -110,7 +108,7 @@ fn main() {
         for (x, c) in line.chars().enumerate() {
             maze[x][y] = match c {
                 '@' => {
-                    starting_locations.push(Location{ x: x, y: y });
+                    starting_locations.push(Location{ x, y });
                     '.'
                 },
                 door if door.is_uppercase() => {
@@ -179,7 +177,7 @@ fn main() {
                     location: other_loc,
                     keys: keys.clone(),
                     distance: state.distance,
-                    other_robots: other_robots,
+                    other_robots,
                 });
             }
         }
@@ -189,8 +187,8 @@ fn main() {
             if maze[x][y] != '#' {
                 queue.push_back(State {
                     location: Location {
-                        x: x,
-                        y: y,
+                        x,
+                        y,
                     },
                     keys: keys.clone(),
                     distance: state.distance + 1,
@@ -201,7 +199,7 @@ fn main() {
 
         seen_states.insert(state);
 
-        if seen_states.len() % 100000 == 0 { println!("{} - {}", seen_states.len(), queue.len()); }
+        if seen_states.len() % 100_000 == 0 { println!("{} - {}", seen_states.len(), queue.len()); }
     }
 
     // for node in nodes.values_mut() {

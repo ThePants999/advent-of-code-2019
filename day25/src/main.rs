@@ -1,3 +1,8 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::process;
 use std::sync::mpsc::channel;
 use std::thread;

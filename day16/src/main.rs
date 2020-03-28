@@ -1,3 +1,8 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::iter;
 
 fn main() {
@@ -9,7 +14,7 @@ fn main() {
         fft.next();
         println!("Progress: {}%", i);
     }
-    let final_value = fft.next().unwrap().iter().map(|digit| digit.to_string()).collect::<String>();
+    let final_value = fft.next().unwrap().iter().map(std::string::ToString::to_string).collect::<String>();
     let result = &final_value[offset..offset + 8];
     println!("Offset: {}\nResult: {}", offset, result);
 }
@@ -60,11 +65,11 @@ struct PartialFFTInner {
 }
  
 impl PartialFFTInner {
-    fn new(input_digits: &Vec<i32>) -> Self {
-        let mut previous_digits = input_digits.clone();
+    fn new(input_digits: &[i32]) -> Self {
+        let mut previous_digits = input_digits.to_vec();
         previous_digits.reverse();
         Self {
-            previous_digits: previous_digits,
+            previous_digits,
             running_total: 0,
         }
     }
@@ -75,7 +80,7 @@ impl Iterator for PartialFFTInner {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.previous_digits.pop().map(|digit| {
-            self.running_total += digit as i64;
+            self.running_total += i64::from(digit);
             (self.running_total % 10) as i32
         })
     }

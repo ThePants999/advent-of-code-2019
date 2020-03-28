@@ -1,12 +1,12 @@
 //use std::collections::HashSet;
 
 fn main() {
-    let mut eris = Eris::top_level(String::from(
+    let mut eris = Eris::top_level(
 "..#.#
 #####
 .#...
 ...#.
-##..."));
+##...");
 
     eris.print_state();
     for _ in 0..200 {
@@ -24,7 +24,7 @@ struct Eris {
 }
 
 impl Eris {
-    fn top_level(initial_state: String) -> Eris {
+    fn top_level(initial_state: &str) -> Eris {
         let state_joined: String = initial_state.lines().collect();
         let mut state = 0;
         for (i, c) in state_joined.chars().enumerate() {
@@ -32,8 +32,8 @@ impl Eris {
         }
         println!("{:#027b}", state);
         Eris {
-            state: state,
-            adjacency: [0u8; 25],
+            state,
+            adjacency: [0_u8; 25],
             child: None,
         }
     }
@@ -41,7 +41,7 @@ impl Eris {
     fn child() -> Box<Eris> {
         Box::new(Eris {
             state: 0,
-            adjacency: [0u8; 25],
+            adjacency: [0_u8; 25],
             child: None,
         })
     }
@@ -49,7 +49,7 @@ impl Eris {
     fn parent(self) -> Eris {
         Eris {
             state: 0,
-            adjacency: [0u8; 25],
+            adjacency: [0_u8; 25],
             child: Some(Box::new(self)),
         }
     }
@@ -140,7 +140,7 @@ impl Eris {
         println!("{}", display);
 
         if let Some(child) = self.child.as_ref() {
-            println!("");
+            println!();
             child.print_state();
         }
     }

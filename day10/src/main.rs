@@ -1,3 +1,8 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::io;
 use std::io::Read;
 use std::fs::File;
@@ -57,7 +62,7 @@ fn main() {
 //     println!("{}", drawing);
 // }
 
-fn find_next_asteroid(map: &Map, angles: &Vec<f64>, last_angle: f64, allow_same_angle: bool) -> (usize, f64) {
+fn find_next_asteroid(map: &Map, angles: &[f64], last_angle: f64, allow_same_angle: bool) -> (usize, f64) {
     let mut next_asteroid = map.height * map.width;
     let mut best_angle = 2.0 * std::f64::consts::PI;
     let mut found_one = false;
@@ -65,7 +70,7 @@ fn find_next_asteroid(map: &Map, angles: &Vec<f64>, last_angle: f64, allow_same_
         if !map.positions[*asteroid].asteroid { continue; } // Skip ones we've already blown up
         if !map.positions[*asteroid].visible { continue; } // Skip ones we can't see
         if angles[*asteroid] < last_angle { continue; } // It's counter-clockwise
-        if !allow_same_angle && (angles[*asteroid] == last_angle) { continue; } // It's behind the last one
+        if !allow_same_angle && ((angles[*asteroid] - last_angle) < std::f64::EPSILON) { continue; } // It's behind the last one
         if angles[*asteroid] > best_angle { continue; } // We've already found a better one
         next_asteroid = *asteroid;
         best_angle = angles[*asteroid];
@@ -161,27 +166,21 @@ fn find_best_position(map: &mut Map) -> usize {
 }
 
 fn greatest_common_denominator(u: u32, v: u32) -> u32 {
-    if u == v { return u; }
-    if u == 0 { return v; }
-    if v == 0 { return u; }
-
-    if (!u & 1) != 0 { // u is even
-        if (v & 1) != 0 { // v is odd
-            return greatest_common_denominator(u >> 1, v);
-        } else { // both even
-            return greatest_common_denominator(u >> 1, v >> 1) << 1;
+    if u == v { u }
+    else if u == 0 { v }
+    else if v == 0 { u }
+    else if (!u & 1) != 0 { // u is even
+        if (v & 1) == 0 { // both even
+            greatest_common_denominator(u >> 1, v >> 1) << 1
+        } else { // v is odd
+            greatest_common_denominator(u >> 1, v)
         }
-    }
-
-    if (!v & 1) != 0 { // u is odd, v is even
-        return greatest_common_denominator(u, v >> 1);
-    }
-
-    // Reduce larger argument
-    if u > v {
-        return greatest_common_denominator((u - v) >> 1, v);
+    } else if (!v & 1) != 0 { // u is odd, v is even
+        greatest_common_denominator(u, v >> 1)
+    } else if u > v { // Reduce larger argument
+        greatest_common_denominator((u - v) >> 1, v)
     } else {
-        return greatest_common_denominator((v - u) >> 1, u)
+        greatest_common_denominator((v - u) >> 1, u)
     }
 }
 
@@ -209,7 +208,7 @@ struct Position {
 impl Position {
     fn new(asteroid: bool) -> Self {
         Position {
-            asteroid: asteroid,
+            asteroid,
             visible: true,
         }
     }
@@ -242,5 +241,5 @@ fn load_map() -> Result<Map, io::Error> {
         }
     }
 
-    Ok(Map { width: width, height: height, positions: positions, asteroids: asteroids})
+    Ok(Map { width, height, positions, asteroids})
 }

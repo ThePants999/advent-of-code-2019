@@ -1,3 +1,8 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::process;
 use std::collections::HashMap;
 use std::sync::mpsc::channel;
@@ -31,6 +36,7 @@ fn main() {
         score: 0,
     };
 
+    #[allow(clippy::while_let_loop)]
     loop {
         let output1 = match out_recv.recv() {
             Ok(val) => val,
@@ -64,12 +70,10 @@ fn main() {
             screen.paddle_x = x;
         } else if tile_id == 4 {
             screen.ball_x = x;
-            if screen.ball_x < screen.paddle_x {
-                in_send.send(-1).unwrap();                
-            } else if screen.ball_x > screen.paddle_x {
-                in_send.send(1).unwrap();
-            } else {
-                in_send.send(0).unwrap();
+            match x {
+                less if less < screen.paddle_x => in_send.send(-1).unwrap(),
+                more if more > screen.paddle_x => in_send.send(1).unwrap(),
+                _ => in_send.send(0).unwrap(),
             }
         }
 

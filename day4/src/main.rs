@@ -1,6 +1,6 @@
 fn main() {
     let mut count = 0;
-    for password in 206938..679129 {
+    for password in 206_938..679_129 {
         if evaluate_password(password) {
             println!("{}", password);
             count += 1;

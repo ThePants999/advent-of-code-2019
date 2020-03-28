@@ -1,3 +1,8 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::io;
 use std::io::Read;
 use std::fs::File;
@@ -59,9 +64,9 @@ impl Image {
         let mut layers = Vec::new();
         layers.push(Vec::with_capacity(width * height));
         Self {
-            width: width,
-            height: height,
-            layers: layers,
+            width,
+            height,
+            layers,
         }
     }
 

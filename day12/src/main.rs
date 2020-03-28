@@ -5,6 +5,7 @@ use std::sync::mpsc;
 extern crate num;
 extern crate primes;
 
+#[allow(clippy::needless_pass_by_value)]
 fn simulate(moons: Vec<RefCell<MoonDimension>>) -> u64 {
     let initial_state = moons.clone();
     let mut steps = 0;
@@ -15,7 +16,7 @@ fn simulate(moons: Vec<RefCell<MoonDimension>>) -> u64 {
     }
 }
 
-fn perform_step(moons: &Vec<RefCell<MoonDimension>>) {
+fn perform_step(moons: &[RefCell<MoonDimension>]) {
     for this_moon_cell in moons {
         let mut this_moon = this_moon_cell.borrow_mut();
         for other_moon_cell in moons {

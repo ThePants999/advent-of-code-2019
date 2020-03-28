@@ -3,7 +3,7 @@ use std::process;
 #[macro_use] extern crate itertools;
 use intcode;
 
-const TARGET: i64 = 19690720;
+const TARGET: i64 = 19_690_720;
 
 fn main() {
     let memory = intcode::load_program("day2/input.txt").unwrap_or_else(|err| {

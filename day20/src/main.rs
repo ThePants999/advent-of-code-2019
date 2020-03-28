@@ -1,12 +1,18 @@
-use std::io::{self, Read};
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::fs::File;
+use std::io::{self, Read};
 use std::process;
 
 use std::fmt;
 
-use std::collections::{HashSet, VecDeque, HashMap};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 
+#[macro_use] extern crate lazy_static;
 extern crate regex;
 use regex::Regex;
 
@@ -67,13 +73,109 @@ struct Portal {
     exit: Location,
 }
 
-struct Maze {
-    grid: Grid,
+struct MazeBoundary {
     entrance: Location,
     exit: Location,
+}
+
+struct Maze {
+    grid: Grid,
+    boundary: MazeBoundary,
     portals: HashMap<Location, Location>,
     bottom_row: usize,
     rightmost_col: usize,
+}
+
+fn check_state_transition(
+    state: ParseState,
+    rows_in_current_state: &mut usize,
+    current_row: &str,
+) -> (ParseState, bool) {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r" [A-Z] ").unwrap();
+    }
+
+    let mut new_state = state;
+    let mut row_is_bottom_row = false;
+
+    *rows_in_current_state += 1;
+
+    match state {
+        ParseState::AboveMaze => {
+            if *rows_in_current_state == 3 {
+                new_state = ParseState::TopSection;
+            }
+        }
+        ParseState::TopSection => {
+            if current_row.contains("#   ") {
+                new_state = ParseState::InnerTop;
+            }
+        }
+        ParseState::InnerTop => {
+            if *rows_in_current_state == 3 {
+                new_state = ParseState::InnerMiddle;
+            }
+        }
+        ParseState::InnerMiddle => {
+            if RE.is_match(current_row) {
+                new_state = ParseState::InnerBottom;
+            }
+        }
+        ParseState::InnerBottom => {
+            if *rows_in_current_state == 3 {
+                new_state = ParseState::BottomSection;
+            }
+        }
+        ParseState::BottomSection => {
+            if current_row.contains("   ") {
+                new_state = ParseState::BelowMaze;
+                row_is_bottom_row = true;
+            }
+        }
+        ParseState::BelowMaze => (),
+    }
+
+    if new_state != state {
+        *rows_in_current_state = 1;
+    }
+
+    (new_state, row_is_bottom_row)
+}
+
+fn handle_portal(
+    map: &mut HashMap<String, PortalPair>,
+    grid: &mut Grid,
+    row: usize,
+    col: usize,
+    state: ParseState,
+    substate: ParseSubState,
+    boundary: &mut MazeBoundary,
+) {
+    let (name, portal) = parse_portal(&grid, row, col, state, substate);
+    if name.eq("AA") {
+        boundary.entrance.row = portal.exit.row;
+        boundary.entrance.col = portal.exit.col;
+        // Don't let the seeker exit the maze via the entrance
+        grid[portal.entrance.row][portal.entrance.col] = '#';
+    } else if name.eq("ZZ") {
+        boundary.exit.row = portal.entrance.row;
+        boundary.exit.col = portal.entrance.col;
+    } else if let Some(pair) = map.get_mut(&name) {
+        // Update existing portal pair
+        pair.b = portal;
+    } else {
+        map.insert(
+            name.clone(),
+            PortalPair {
+                name,
+                a: portal,
+                b: Portal {
+                    entrance: Location { row: 0, col: 0 },
+                    exit: Location { row: 0, col: 0 },
+                },
+            },
+        );
+    }
 }
 
 fn load_maze() -> Result<Maze, io::Error> {
@@ -81,7 +183,7 @@ fn load_maze() -> Result<Maze, io::Error> {
     let mut input_maze = String::new();
     input.read_to_string(&mut input_maze)?;
 
-    let mut grid: Grid = [['!'; WIDTH];HEIGHT];
+    let mut grid: Grid = [['!'; WIDTH]; HEIGHT];
     let mut rows: Vec<String> = Vec::new();
     for (row, line) in input_maze.lines().enumerate() {
         rows.push(line.to_string());
@@ -91,50 +193,29 @@ fn load_maze() -> Result<Maze, io::Error> {
     }
 
     let mut map: HashMap<String, PortalPair> = HashMap::new();
-    let mut entrance_row = 0;
-    let mut entrance_col = 0;
-    let mut exit_row = 0;
-    let mut exit_col = 0;
+    let mut boundary = MazeBoundary { entrance: Location { row: 0, col: 0 }, exit: Location { row: 0, col: 0 } };
     let mut bottom_row = 0;
-    let mut right_col = 0;
+    let mut rightmost_col = 0;
 
     let mut state = ParseState::AboveMaze;
     let mut rows_in_current_state = 0;
-    let re = Regex::new(r" [A-Z] ").unwrap();
-    for row in 0..rows.len() {
-        rows_in_current_state += 1;
-        let old_state = state;
-
-        // Handle state transitions
-        match state {
-            ParseState::AboveMaze => {
-                if rows_in_current_state == 3 { state = ParseState::TopSection; }
-            },
-            ParseState::TopSection => {
-                if rows[row].contains("#   ") { state = ParseState::InnerTop; }
-            },
-            ParseState::InnerTop => {
-                if rows_in_current_state == 3 { state = ParseState::InnerMiddle; }
-            },
-            ParseState::InnerMiddle => {
-                if re.is_match(&rows[row]) { state = ParseState::InnerBottom; }
-            },
-            ParseState::InnerBottom => {
-                if rows_in_current_state == 3 { state = ParseState::BottomSection; }
-            },
-            ParseState::BottomSection => {
-                if rows[row].contains("   ") {
-                    state = ParseState::BelowMaze; 
-                    bottom_row = row;
-                }
-            },
-            ParseState::BelowMaze => (),
+    for row in 0..rows.len() {      
+        let (new_state, row_is_bottom_row) =
+            check_state_transition(state, &mut rows_in_current_state, &rows[row]);
+        state = new_state;
+        if row_is_bottom_row {
+            bottom_row = row;
         }
-        if state != old_state { rows_in_current_state = 1; }
 
-        if (state == ParseState::AboveMaze || state == ParseState::InnerBottom) && rows_in_current_state == 2 {
-            continue;
-        } else if (state == ParseState::BelowMaze || state == ParseState::InnerTop) && rows_in_current_state == 2 {
+        if rows_in_current_state == 2
+            && [
+                ParseState::AboveMaze,
+                ParseState::InnerBottom,
+                ParseState::BelowMaze,
+                ParseState::InnerTop,
+            ]
+            .contains(&state)
+        {
             continue;
         }
 
@@ -148,40 +229,24 @@ fn load_maze() -> Result<Maze, io::Error> {
             }
 
             if grid[row][col].is_alphabetic() {
-                let (name, portal) = parse_portal(&grid, row, col, state, substate);
-                if name.eq("AA") {
-                    entrance_row = portal.exit.row;
-                    entrance_col = portal.exit.col;
-                    // Don't let the seeker exit the maze via the entrance
-                    grid[portal.entrance.row][portal.entrance.col] = '#';
-                } else if name.eq("ZZ") {
-                    exit_row = portal.entrance.row;
-                    exit_col = portal.entrance.col;
-                } else if let Some(pair) = map.get_mut(&name) {
-                    // Update existing portal pair
-                    pair.b = portal;
-                } else {
-                    map.insert(name.clone(), PortalPair {
-                        name: name,
-                        a: portal,
-                        b: Portal { entrance: Location { row: 0, col: 0 }, exit: Location { row: 0, col: 0 }},
-                    });
-                }    
+                handle_portal(&mut map, &mut grid, row, col, state, substate, &mut boundary);
 
-                if state == ParseState::TopSection || state == ParseState::InnerMiddle || state == ParseState::BottomSection {
+                if state == ParseState::TopSection
+                    || state == ParseState::InnerMiddle
+                    || state == ParseState::BottomSection
+                {
                     skip_next_char = true;
                     substate = match substate {
                         ParseSubState::LeftOfMaze => ParseSubState::LeftSection,
                         ParseSubState::LeftSection => ParseSubState::InnerSection,
                         ParseSubState::InnerSection => ParseSubState::RightSection,
                         ParseSubState::RightSection => {
-                            right_col = col;
+                            rightmost_col = col;
                             ParseSubState::RightOfMaze
-                        },
+                        }
                         ParseSubState::RightOfMaze => panic!("Unexpected RightOfMaze"),
                     };
-                }
-            } else if substate == ParseSubState::LeftOfMaze && grid[row][col] == '#' {
+                }            } else if substate == ParseSubState::LeftOfMaze && grid[row][col] == '#' {
                 substate = ParseSubState::LeftSection;
             } else if state == ParseState::InnerMiddle {
                 if substate == ParseSubState::LeftSection && grid[row][col] == ' ' {
@@ -198,43 +263,50 @@ fn load_maze() -> Result<Maze, io::Error> {
         portals.insert(pair.a.entrance, pair.b.exit);
         portals.insert(pair.b.entrance, pair.a.exit);
     }
-    
+
     Ok(Maze {
-        grid: grid,
-        entrance: Location { row: entrance_row, col: entrance_col, },
-        exit: Location { row: exit_row, col: exit_col, },
-        portals: portals,
-        bottom_row: bottom_row,
-        rightmost_col: right_col,
+        grid,
+        boundary,
+        portals,
+        bottom_row,
+        rightmost_col,
     })
 }
 
-fn parse_portal(grid: &Grid, row: usize, col: usize, state: ParseState, substate: ParseSubState) -> (String, Portal) {
+fn parse_portal(
+    grid: &Grid,
+    row: usize,
+    col: usize,
+    state: ParseState,
+    substate: ParseSubState,
+) -> (String, Portal) {
     let mut portal_name = grid[row][col].to_string();
-    let mut entrance = Location { row: row, col: col };
-    let mut exit = Location { row: row, col: col };
+    let mut entrance = Location { row, col };
+    let mut exit = Location { row, col };
     match state {
         ParseState::AboveMaze | ParseState::InnerBottom => {
             portal_name.push(grid[row + 1][col]);
             entrance.row += 1;
             exit.row += 2;
-        },
+        }
         ParseState::BelowMaze | ParseState::InnerTop => {
             portal_name.push(grid[row + 1][col]);
             exit.row -= 1;
-        },
+        }
         _ => {
             portal_name.push(grid[row][col + 1]);
             match substate {
                 ParseSubState::LeftOfMaze | ParseSubState::InnerSection => {
                     entrance.col += 1;
                     exit.col += 2;
-                },
-                _ => { exit.col -= 1; }
+                }
+                _ => {
+                    exit.col -= 1;
+                }
             }
         }
     }
-    (portal_name, Portal { entrance: entrance, exit: exit })
+    (portal_name, Portal { entrance, exit })
 }
 
 fn main() {
@@ -250,15 +322,17 @@ fn main() {
 
     queue.push_back(State {
         level: 0,
-        location: maze.entrance,
+        location: maze.boundary.entrance,
         distance: 0,
     });
 
     while !queue.is_empty() {
         let mut state = queue.pop_front().unwrap();
-        if seen_states.contains(&state) { continue; }
+        if seen_states.contains(&state) {
+            continue;
+        }
 
-        if state.location == maze.exit {
+        if state.location == maze.boundary.exit {
             if state.level == 0 {
                 println!("{}", state.distance - 1);
                 break;
@@ -270,7 +344,11 @@ fn main() {
 
         if let Some(portal_exit) = maze.portals.get(&state.location) {
             // Teleport!
-            if state.location.row == 1 || state.location.row == maze.bottom_row || state.location.col == 1 || state.location.col == maze.rightmost_col {
+            if state.location.row == 1
+                || state.location.row == maze.bottom_row
+                || state.location.col == 1
+                || state.location.col == maze.rightmost_col
+            {
                 // Outer - up a level
                 if state.level == 0 {
                     // Actually a wall
@@ -303,7 +381,9 @@ fn main() {
 
         seen_states.insert(state);
 
-        if seen_states.len() % 100000 == 0 { println!("{} - {}", seen_states.len(), queue.len()); }
+        if seen_states.len() % 100_000 == 0 {
+            println!("{} - {}", seen_states.len(), queue.len());
+        }
     }
 }
 
@@ -329,7 +409,9 @@ impl Eq for State {}
 
 impl Hash for State {
     fn hash<H>(&self, state: &mut H)
-    where H: Hasher {
+    where
+        H: Hasher,
+    {
         self.location.row.hash(state);
         self.location.col.hash(state);
         self.level.hash(state);

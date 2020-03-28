@@ -69,7 +69,7 @@ fn calculate_intersection(first: &Segment, second: &Segment) -> Option<Intersect
         let first_length = manhattan_distance(coords, first.start) + first.length_before;
         let second_length = manhattan_distance(coords, second.start) + second.length_before;
         Intersection {
-            coords: coords,
+            coords,
             manhattan_distance: manhattan_distance(coords, Coordinates { x: 0, y: 0 }),
             wire_length: first_length + second_length,
         }
@@ -96,13 +96,11 @@ fn find_intersection(first: &Segment, second: &Segment) -> Option<Coordinates> {
            (cmp::max(second.start.y, second.end.y) >= first.start.y) {
                return Some(Coordinates { x: second.start.x, y: first.start.y });
         }
-    } else {
-        if (cmp::min(first.start.y, first.end.y) <= second.start.y) &&
+    } else if (cmp::min(first.start.y, first.end.y) <= second.start.y) &&
            (cmp::max(first.start.y, first.end.y) >= second.start.y) &&
            (cmp::min(second.start.x, second.end.x) <= first.start.x) &&
            (cmp::max(second.start.x, second.end.x) >= first.start.x) {
-               return Some(Coordinates { x: first.start.x, y: second.start.y });
-        }
+        return Some(Coordinates { x: first.start.x, y: second.start.y });
     }
 
     None
@@ -146,10 +144,10 @@ fn load_wires() -> Result<Vec<Wire>, io::Error> {
                     }
                 };
                 let distance = chars.as_str().parse::<i32>().map_err(|e| {
-                    return io::Error::new(
+                    io::Error::new(
                         io::ErrorKind::InvalidInput,
                         format!("Invalid distance: {} ({})", chars.as_str(), e),
-                    );
+                    )
                 })?;
 
                 let end_x = match direction {
@@ -169,7 +167,7 @@ fn load_wires() -> Result<Vec<Wire>, io::Error> {
                         Directions::Up | Directions::Down => Orientations::Vertical,
                         Directions::Left | Directions::Right => Orientations::Horizontal,
                     },
-                    start: Coordinates { x: x, y: y },
+                    start: Coordinates { x, y },
                     end: Coordinates { x: end_x, y: end_y },
                 };
 
@@ -182,7 +180,7 @@ fn load_wires() -> Result<Vec<Wire>, io::Error> {
             .collect::<Result<Vec<Segment>, io::Error>>()?;
 
         wires.push(Wire { id, segments });
-        id = id + 1;
+        id += 1;
     }
 
     Ok(wires)

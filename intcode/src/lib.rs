@@ -33,6 +33,11 @@
 #![crate_name = "intcode"]
 #![crate_type = "lib"]
 
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
 use std::fs::File;
 use std::io;
 use std::io::Read;
@@ -119,7 +124,7 @@ struct Parameter {
 /// A virtual computer whose memory contains an Intcode program and which can execute
 /// said program.
 pub struct Computer {
-    memory: Box<[i64; MEMORY_CAPACITY]>,
+    memory: Vec<i64>,
     in_channel: Receiver<i64>,
     out_channel: Sender<i64>,
     instruction_pointer: usize,
@@ -136,16 +141,14 @@ impl Computer {
     /// runtime outputs.
     pub fn new(program: &[i64], in_channel: Receiver<i64>, out_channel: Sender<i64>) -> Self {
         let mut comp = Self {
-            memory: Box::new([0; MEMORY_CAPACITY]),
+            memory: program.to_vec(),
             in_channel,
             out_channel,
             instruction_pointer: 0,
             relative_base: 0,
         };
 
-        for (position, element) in program.iter().enumerate() {
-            comp.memory[position] = *element;
-        }
+        comp.memory.extend(std::iter::repeat(0).take(MEMORY_CAPACITY - program.len()));
 
         comp
     }
@@ -156,7 +159,11 @@ impl Computer {
     /// may block waiting for input on the computer's input channel if sufficient inputs are not
     /// pre-sent.
     /// 
-    /// Returns Ok(()) if the program completes successfully, or Err if anything goes wrong.
+    /// # Errors
+    /// 
+    /// Returns an error if any problem is hit executing the program, which would indicate either
+    /// that the program is invalid, or that invalid inputs were provided to it, or that the
+    /// channels were closed prematurely.
     pub fn run(&mut self) -> Result<(), String> {
         loop {
             // An instruction consists of an operation code and a set of parameters.
@@ -175,7 +182,7 @@ impl Computer {
                 instruction,
             };
 
-            self.apply_operation(operation)?;
+            self.apply_operation(&operation)?;
         }
     }
 
@@ -215,7 +222,7 @@ impl Computer {
         Ok(parameters)
     }
 
-    fn apply_operation(&mut self, op: Operation) -> Result<(), String> {
+    fn apply_operation(&mut self, op: &Operation) -> Result<(), String> {
         match op.instruction.optype {
             OperationTypes::Add => {
                 // Add parameters 0 and 1, and store the result at the address specified
@@ -308,6 +315,11 @@ impl Computer {
 
 /// Helper function for running an Intcode program (from file) that can run all the way to
 /// completion with a predetermined set of inputs (including no inputs).
+/// 
+/// # Errors
+/// 
+/// Returns an error if the file cannot be opened or read, or if it is syntactically
+/// invalid, or if the computer hits a problem running the program it contained.
 pub fn load_and_run_computer(path: &str, inputs: &[i64]) -> Result<Vec<i64>, String> {
     let program = load_program(path).map_err(|e| format!("{:?}", e))?;
     run_computer(&program, inputs)
@@ -315,6 +327,10 @@ pub fn load_and_run_computer(path: &str, inputs: &[i64]) -> Result<Vec<i64>, Str
 
 /// Helper function for running an Intcode program that can run all the way to
 /// completion with a predetermined set of inputs (including no inputs).
+/// 
+/// # Errors
+/// 
+/// Returns an error if the computer hits a problem running the supplied program.
 pub fn run_computer(program: &[i64], inputs: &[i64]) -> Result<Vec<i64>, String> {
     let (in_sender, in_receiver) = mpsc::channel();
     let (out_sender, out_receiver) = mpsc::channel();

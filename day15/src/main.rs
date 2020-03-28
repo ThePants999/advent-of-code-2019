@@ -68,7 +68,7 @@ fn main() {
             moves_since_new_info = 0;
         } else {
             moves_since_new_info += 1;
-            if moves_since_new_info == 100000 { break; }
+            if moves_since_new_info == 100_000 { break; }
         }
     }
 
@@ -135,10 +135,10 @@ fn choose_direction(ship: &Ship, droid_x: i64, droid_y: i64) -> i64 {
         TargetStates::Visited => visited_dirs.push(4),
         TargetStates::Blocked => (),
     };
-    if non_visited_dirs.len() > 0 {
-        non_visited_dirs[thread_rng().gen_range(0, non_visited_dirs.len())]
-    } else {
+    if non_visited_dirs.is_empty() {
         visited_dirs[thread_rng().gen_range(0, visited_dirs.len())]
+    } else {
+        non_visited_dirs[thread_rng().gen_range(0, non_visited_dirs.len())]
     }
 }
 

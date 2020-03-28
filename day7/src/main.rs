@@ -36,7 +36,7 @@ fn main() {
                         if val_5.contains(e) { continue; }
                         val_5.push(e);
 
-                        let sequence = val_5.chars().map(|c| c.to_digit(10).unwrap() as i64).collect();
+                        let sequence = val_5.chars().map(|c| i64::from(c.to_digit(10).unwrap())).collect::<Vec<i64>>();
                         let output = run_amplifier_sequence(&memory, &sequence);
                         if output > max_output { max_output = output; }
                     }
@@ -48,7 +48,7 @@ fn main() {
     println!("{}", max_output);
 }
 
-fn run_amplifier_sequence(program: &Vec<i64>, sequence: &Vec<i64>) -> i64 {
+fn run_amplifier_sequence(program: &[i64], sequence: &[i64]) -> i64 {
     // let mut input = 0;
     // for phase_setting in sequence {
     //     let mut memory = program.clone();
@@ -63,7 +63,7 @@ fn run_amplifier_sequence(program: &Vec<i64>, sequence: &Vec<i64>) -> i64 {
 
     // The loop is actually going to give the phase settings to amplifiers in the order BCDEA, so
     // take A's setting off the front and put it on the end.
-    let mut sequence = sequence.clone();
+    let mut sequence = sequence.to_vec();
     let a_setting = sequence.remove(0);    
     sequence.push(a_setting);
 
@@ -94,6 +94,6 @@ fn run_amplifier_sequence(program: &Vec<i64>, sequence: &Vec<i64>) -> i64 {
     let mut output: i64 = 0;
     loop {
         output = link_recv.recv().unwrap_or(output);
-        if let Err(_) = first_in_send.send(output) { break output; }
+        if first_in_send.send(output).is_err() { break output; }
     }
 }
