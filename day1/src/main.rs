@@ -8,8 +8,8 @@ fn main() {
         std::process::exit(1);
     });
     
-    let part_1_fuel: i32 = modules.iter().copied().map(fuel_for_weight).sum();
-    let part_2_fuel: i32 = modules.iter().copied().map(fuel_for_module).sum();
+    let part_1_fuel: i32 = modules.iter().copied().map(|module| fuel_for_weight(module, false)).sum();
+    let part_2_fuel: i32 = modules.iter().copied().map(|module| fuel_for_weight(module, true)).sum();
     println!("Part 1: {}\nPart 2: {}\nTime: {}ms", part_1_fuel, part_2_fuel, start_time.elapsed().as_millis());
 }
 
@@ -24,21 +24,18 @@ fn load_modules() -> Result<Vec<i32>, io::Error> {
         .collect()
 }
 
-fn fuel_for_module(module_mass: i32) -> i32 {
-    let base_fuel = fuel_for_weight(module_mass);
-    base_fuel + fuel_for_fuel(base_fuel)
-}
-
-fn fuel_for_fuel(weight: i32) -> i32 {
-    match fuel_for_weight(weight) {
-        0 => 0,
-        fuel => fuel + fuel_for_fuel(fuel)
+fn fuel_for_weight(weight: i32, recurse: bool) -> i32 {
+    let mut total_fuel = 0;
+    let mut weight_just_added = weight;
+    loop {
+        match (weight_just_added / 3) - 2 {
+            fuel if fuel >= 0 => {
+                weight_just_added = fuel;
+                total_fuel += fuel;
+            },
+            _ => break,
+        }
+        if !recurse { break; }
     }
-}
-
-fn fuel_for_weight(weight: i32) -> i32 {
-    match (weight / 3) - 2 {
-        fuel if fuel >= 0 => fuel,
-        _ => 0
-    }
+    total_fuel
 }
