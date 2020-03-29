@@ -24,7 +24,7 @@ fn load_modules() -> Result<Vec<i32>, io::Error> {
         .collect()
 }
 
-fn fuel_for_weight(weight: i32, recurse: bool) -> i32 {
+fn fuel_for_weight(weight: i32, include_fuel_for_fuel: bool) -> i32 {
     let mut total_fuel = 0;
     let mut weight_just_added = weight;
     loop {
@@ -35,7 +35,7 @@ fn fuel_for_weight(weight: i32, recurse: bool) -> i32 {
             },
             _ => break,
         }
-        if !recurse { break; }
+        if !include_fuel_for_fuel { break; }
     }
     total_fuel
 }

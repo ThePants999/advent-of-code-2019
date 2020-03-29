@@ -2,6 +2,7 @@
 
 members = [
     "intcode",
+    "cjp_threadpool",
     "day1",
     "day2",
     "day3",
