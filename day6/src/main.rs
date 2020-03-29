@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::io::{self, Read};
 use std::process;
 
@@ -7,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     // Load from file and construct a tree and map of OrbitalObjects.
     let map = load_orbits("day6/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
@@ -39,7 +40,12 @@ fn main() {
         - 2
         - (2 * common_ancestor.borrow().depth.unwrap());
 
-    println!("Total depth: {}\nDistance: {}", total_depth, distance);
+    println!(
+        "Total depth: {}\nDistance: {}\nTime: {}ms",
+        total_depth,
+        distance,
+        start_time.elapsed().as_millis()
+    );
 }
 
 /// An object that may be in orbit around another object and/or may have other objects in orbit
@@ -155,14 +161,14 @@ impl OrbitalObject {
 /// Loads a definition of orbits from file and constructs a tree of `OrbitalObject`s from them, plus
 /// a map indexed by `OrbitalObject.name`.  Returns an error if the file cannot be found or loaded,
 /// or if its contents are invalid.
-/// 
+///
 /// # Errors
-/// 
+///
 /// Returns an `io::Error` for any issues reading `source_file`, including invalid contents.
 pub fn load_orbits(
     source_file: &str,
 ) -> Result<HashMap<String, Rc<RefCell<OrbitalObject>>>, io::Error> {
-    let mut input = File::open(source_file)?;
+    let mut input = std::fs::File::open(source_file)?;
     let mut orbits = String::new();
     input.read_to_string(&mut orbits)?;
 

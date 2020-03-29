@@ -1,21 +1,20 @@
-use std::io;
-use std::io::Read;
-use std::fs::File;
-use std::process;
+use std::io::{self, Read};
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     let modules = load_modules().unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
     
     let part_1_fuel: i32 = modules.iter().copied().map(fuel_for_weight).sum();
     let part_2_fuel: i32 = modules.iter().copied().map(fuel_for_module).sum();
-    println!("Part 1: {}\nPart 2: {}", part_1_fuel, part_2_fuel);
+    println!("Part 1: {}\nPart 2: {}\nTime: {}ms", part_1_fuel, part_2_fuel, start_time.elapsed().as_millis());
 }
 
 fn load_modules() -> Result<Vec<i32>, io::Error> {
-    let mut input = File::open("day1/input.txt")?;
+    let mut input = std::fs::File::open("day1/input.txt")?;
     let mut modules = String::new();
     input.read_to_string(&mut modules)?;
     modules

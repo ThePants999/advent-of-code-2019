@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::process;
-use std::sync::mpsc::channel;
-use std::thread;
+use std::sync::mpsc;
 
 use intcode;
-#[macro_use] extern crate itertools;
+#[macro_use]
+extern crate itertools;
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     let program = intcode::load_program("day11/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
         process::exit(1);
@@ -15,22 +17,32 @@ fn main() {
     let part_1_robot = run_paint_sequence(&program, false);
     let part_2_robot = run_paint_sequence(&program, true);
     let mut picture = String::new();
-    for (y, x) in iproduct!((part_2_robot.min_y..=part_2_robot.max_y), (part_2_robot.min_x..=part_2_robot.max_x)) {
-        if x == part_2_robot.min_x { picture.push('\n'); }
+    for (y, x) in iproduct!(
+        (part_2_robot.min_y..=part_2_robot.max_y),
+        (part_2_robot.min_x..=part_2_robot.max_x)
+    ) {
+        if x == part_2_robot.min_x {
+            picture.push('\n');
+        }
         match part_2_robot.get_color_at(x, y) {
             1 => picture.push('#'),
             _ => picture.push(' '),
         };
     }
 
-    println!("Part 1: {}\nPart 2: {}", part_1_robot.count_painted_panels(), picture);
+    println!(
+        "Part 1: {}\nPart 2: {}\nTime: {}ms",
+        part_1_robot.count_painted_panels(),
+        picture,
+        start_time.elapsed().as_millis()
+    );
 }
 
 fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
-    let (in_send, in_recv) = channel();
-    let (out_send, out_recv) = channel();
+    let (in_send, in_recv) = mpsc::channel();
+    let (out_send, out_recv) = mpsc::channel();
     let mut computer = intcode::Computer::new(program, in_recv, out_send);
-    thread::spawn(move || {
+    std::thread::spawn(move || {
         computer.run().unwrap_or_else(|e| {
             println!("Computer failed: {}", e);
             process::exit(1);
@@ -38,17 +50,21 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
     });
 
     let mut robot = Robot::new();
-    if paint_current_panel { robot.paint(1); }
+    if paint_current_panel {
+        robot.paint(1);
+    }
 
     loop {
-        if in_send.send(robot.get_current_color()).is_err() { break; }
+        if in_send.send(robot.get_current_color()).is_err() {
+            break;
+        }
         match out_recv.recv() {
             Ok(val) => match val {
                 0 | 1 => robot.paint(val),
                 _ => {
                     println!("Invalid paint instruction received: {}", val);
-                    process::exit(1);        
-                },
+                    process::exit(1);
+                }
             },
             Err(_) => break,
         };
@@ -58,8 +74,8 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
                 1 => robot.turn_and_move(Turns::Right),
                 _ => {
                     println!("Invalid turn instruction received: {}", val);
-                    process::exit(1);        
-                },
+                    process::exit(1);
+                }
             },
             Err(_) => break,
         };
@@ -68,7 +84,7 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
     robot
 }
 
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 enum Turns {
     Left,
     Right,
@@ -138,20 +154,28 @@ impl Robot {
         match self.dir {
             Directions::Up => {
                 self.y += 1;
-                if self.y > self.max_y { self.max_y = self.y; };
-            },
+                if self.y > self.max_y {
+                    self.max_y = self.y;
+                };
+            }
             Directions::Down => {
                 self.y -= 1;
-                if self.y < self.min_y { self.min_y = self.y; };
-            },
+                if self.y < self.min_y {
+                    self.min_y = self.y;
+                };
+            }
             Directions::Left => {
                 self.x -= 1;
-                if self.x < self.min_x { self.min_x = self.x; };
-            },
+                if self.x < self.min_x {
+                    self.min_x = self.x;
+                };
+            }
             Directions::Right => {
                 self.x += 1;
-                if self.x > self.max_x { self.max_x = self.x; };
-            },
+                if self.x > self.max_x {
+                    self.max_x = self.x;
+                };
+            }
         }
     }
 

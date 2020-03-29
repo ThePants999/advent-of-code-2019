@@ -3,13 +3,11 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
-use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 
-use std::fs::File;
-use std::io;
-use std::io::Read;
+use std::io::{self, Read};
 use std::process;
 
 extern crate math;
@@ -17,6 +15,8 @@ extern crate math;
 const ONE_TRILLION: u64 = 1_000_000_000_000;
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     let map = load_reactions("day14/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
         process::exit(1);
@@ -69,13 +69,23 @@ fn main() {
         }
     }
 
-    println!("Part 1: {}\nPart 2: {}", ore_for_one_fuel, fuel_amount);
+    println!(
+        "Part 1: {}\nPart 2: {}\nTime: {}ms",
+        ore_for_one_fuel,
+        fuel_amount,
+        start_time.elapsed().as_millis()
+    );
 }
 
 fn recalculate_requirements(chemical: &mut Chemical) {
-    chemical.needed = chemical.needed_by.iter().map(|weak| { weak.upgrade().unwrap().borrow().needed }).sum();
+    chemical.needed = chemical
+        .needed_by
+        .iter()
+        .map(|weak| weak.upgrade().unwrap().borrow().needed)
+        .sum();
 
-    let reactions = math::round::ceil(chemical.needed as f64 / chemical.creates_quantity as f64, 0) as u64;
+    let reactions =
+        math::round::ceil(chemical.needed as f64 / chemical.creates_quantity as f64, 0) as u64;
     for req_cell in &chemical.reqs {
         let mut req = req_cell.borrow_mut();
         req.needed = reactions * req.reaction_quantity;
@@ -84,7 +94,7 @@ fn recalculate_requirements(chemical: &mut Chemical) {
         let req_chemical_cell = req.chemical.upgrade().unwrap();
         let mut req_chemical = req_chemical_cell.borrow_mut();
         recalculate_requirements(&mut req_chemical);
-    }    
+    }
 }
 
 struct Chemical {
@@ -101,7 +111,7 @@ struct Requirement {
 }
 
 fn load_reactions(source_file: &str) -> Result<HashMap<String, Rc<RefCell<Chemical>>>, io::Error> {
-    let mut input = File::open(source_file)?;
+    let mut input = std::fs::File::open(source_file)?;
     let mut reactions = String::new();
     input.read_to_string(&mut reactions)?;
 
@@ -109,8 +119,21 @@ fn load_reactions(source_file: &str) -> Result<HashMap<String, Rc<RefCell<Chemic
 
     for reaction in reactions.lines() {
         let mut sides = reaction.split(" => ");
-        let inputs = sides.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid input line: {}", reaction)))?.split(", ");
-        let output = sides.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid input line: {}", reaction)))?;
+        let inputs = sides
+            .next()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Invalid input line: {}", reaction),
+                )
+            })?
+            .split(", ");
+        let output = sides.next().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Invalid input line: {}", reaction),
+            )
+        })?;
 
         let (output_quantity, output_name) = parse_quantity(output)?;
         let output_chemical_cell = get_chemical(&mut map, output_name);
@@ -136,13 +159,28 @@ fn load_reactions(source_file: &str) -> Result<HashMap<String, Rc<RefCell<Chemic
 
 fn parse_quantity(input: &str) -> Result<(u64, &str), io::Error> {
     let mut inputs = input.split(' ');
-    let quantity_str = inputs.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid input data: {}", input)))?;
-    let quantity = quantity_str.parse::<u64>().map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    let name = inputs.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid input data: {}", input)))?;
+    let quantity_str = inputs.next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid input data: {}", input),
+        )
+    })?;
+    let quantity = quantity_str
+        .parse::<u64>()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let name = inputs.next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid input data: {}", input),
+        )
+    })?;
     Ok((quantity, name))
 }
 
-fn get_chemical(map: &mut HashMap<String, Rc<RefCell<Chemical>>>, name: &str) -> Rc<RefCell<Chemical>> {
+fn get_chemical(
+    map: &mut HashMap<String, Rc<RefCell<Chemical>>>,
+    name: &str,
+) -> Rc<RefCell<Chemical>> {
     if !map.contains_key(name) {
         let chemical = Chemical {
             reqs: Vec::new(),

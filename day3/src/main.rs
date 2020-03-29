@@ -1,13 +1,12 @@
-use std::fs::File;
-use std::io;
-use std::io::Read;
-use std::process;
 use std::cmp;
+use std::io::{self, Read};
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     let wires = load_wires().unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     // Could easily extend to arbitrary number of wires, but let's KISS.
@@ -16,14 +15,21 @@ fn main() {
     for first in &wires[1].segments {
         for second in &wires[0].segments {
             if let Some(int) = calculate_intersection(&first, &second) {
-                if (int.coords.x == 0) && (int.coords.y == 0) { continue; }
+                if (int.coords.x == 0) && (int.coords.y == 0) {
+                    continue;
+                }
                 manhattan_distances.push(int.manhattan_distance);
                 wire_lengths.push(int.wire_length);
             }
         }
     }
 
-    println!("Shortest Manhattan: {}\nShortest length: {}", manhattan_distances.iter().min().unwrap(), wire_lengths.iter().min().unwrap());
+    println!(
+        "Shortest Manhattan: {}\nShortest length: {}\nTime: {}ms",
+        manhattan_distances.iter().min().unwrap(),
+        wire_lengths.iter().min().unwrap(),
+        start_time.elapsed().as_millis()
+    );
 }
 
 enum Directions {
@@ -90,17 +96,25 @@ fn find_intersection(first: &Segment, second: &Segment) -> Option<Coordinates> {
             return None;
         }
     } else if first.orientation == Orientations::Horizontal {
-        if (cmp::min(first.start.x, first.end.x) <= second.start.x) &&
-           (cmp::max(first.start.x, first.end.x) >= second.start.x) &&
-           (cmp::min(second.start.y, second.end.y) <= first.start.y) &&
-           (cmp::max(second.start.y, second.end.y) >= first.start.y) {
-               return Some(Coordinates { x: second.start.x, y: first.start.y });
+        if (cmp::min(first.start.x, first.end.x) <= second.start.x)
+            && (cmp::max(first.start.x, first.end.x) >= second.start.x)
+            && (cmp::min(second.start.y, second.end.y) <= first.start.y)
+            && (cmp::max(second.start.y, second.end.y) >= first.start.y)
+        {
+            return Some(Coordinates {
+                x: second.start.x,
+                y: first.start.y,
+            });
         }
-    } else if (cmp::min(first.start.y, first.end.y) <= second.start.y) &&
-           (cmp::max(first.start.y, first.end.y) >= second.start.y) &&
-           (cmp::min(second.start.x, second.end.x) <= first.start.x) &&
-           (cmp::max(second.start.x, second.end.x) >= first.start.x) {
-        return Some(Coordinates { x: first.start.x, y: second.start.y });
+    } else if (cmp::min(first.start.y, first.end.y) <= second.start.y)
+        && (cmp::max(first.start.y, first.end.y) >= second.start.y)
+        && (cmp::min(second.start.x, second.end.x) <= first.start.x)
+        && (cmp::max(second.start.x, second.end.x) >= first.start.x)
+    {
+        return Some(Coordinates {
+            x: first.start.x,
+            y: second.start.y,
+        });
     }
 
     None
@@ -111,7 +125,7 @@ fn manhattan_distance(first: Coordinates, second: Coordinates) -> i32 {
 }
 
 fn load_wires() -> Result<Vec<Wire>, io::Error> {
-    let mut input_file = File::open("day3/input.txt")?;
+    let mut input_file = std::fs::File::open("day3/input.txt")?;
     let mut input = String::new();
     input_file.read_to_string(&mut input)?;
 
@@ -153,12 +167,12 @@ fn load_wires() -> Result<Vec<Wire>, io::Error> {
                 let end_x = match direction {
                     Directions::Right => x + distance,
                     Directions::Left => x - distance,
-                    _ => x
+                    _ => x,
                 };
                 let end_y = match direction {
                     Directions::Up => y + distance,
                     Directions::Down => y - distance,
-                    _ => y
+                    _ => y,
                 };
 
                 let segment = Segment {

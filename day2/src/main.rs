@@ -1,14 +1,14 @@
-use std::process;
-
 #[macro_use] extern crate itertools;
 use intcode;
 
 const TARGET: i64 = 19_690_720;
 
 fn main() {
+    let start_time = std::time::Instant::now();
+    
     let memory = intcode::load_program("day2/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     let mut memory_copy = memory.clone();
@@ -28,7 +28,7 @@ fn main() {
         computer.run().unwrap();
         if computer.fetch_from_address(0).unwrap() == TARGET {
             let answer = (noun * 100) + verb;
-            println!("Part 2: {}", answer);
+            println!("Part 2: {}\nTime: {}ms", answer, start_time.elapsed().as_millis());
             break;
         }
     }

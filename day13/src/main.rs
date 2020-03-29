@@ -3,15 +3,17 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
-use std::process;
 use std::collections::HashMap;
-use std::sync::mpsc::channel;
-use std::thread;
+use std::process;
+use std::sync::mpsc;
 
 use intcode;
-#[macro_use] extern crate itertools;
+#[macro_use]
+extern crate itertools;
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     let mut program = intcode::load_program("day13/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
         process::exit(1);
@@ -22,14 +24,19 @@ fn main() {
         println!("Computer failed: {}", e);
         process::exit(1);
     });
-    let blocks = outputs_part_1.iter().skip(2).step_by(3).filter(|tile_id| **tile_id == 2).count();
+    let blocks = outputs_part_1
+        .iter()
+        .skip(2)
+        .step_by(3)
+        .filter(|tile_id| **tile_id == 2)
+        .count();
 
     // Part 2
     program[0] = 2;
-    let (in_send, in_recv) = channel();
-    let (out_send, out_recv) = channel();
+    let (in_send, in_recv) = mpsc::channel();
+    let (out_send, out_recv) = mpsc::channel();
     let mut computer = intcode::Computer::new(&program, in_recv, out_send);
-    thread::spawn(move || {
+    std::thread::spawn(move || {
         computer.run().unwrap_or_else(|e| {
             println!("Computer failed: {}", e);
             process::exit(1);
@@ -70,8 +77,12 @@ fn main() {
         let tile_id = output3;
         let coordinates = format!("({}, {})", x, y);
         if !screen.tiles.contains_key(&coordinates) {
-            if x >= screen.width { screen.width = x + 1; }
-            if y >= screen.height { screen.height = y + 1; }
+            if x >= screen.width {
+                screen.width = x + 1;
+            }
+            if y >= screen.height {
+                screen.height = y + 1;
+            }
         }
         screen.tiles.insert(coordinates, tile_id);
 
@@ -87,14 +98,21 @@ fn main() {
         }
     }
 
-    println!("Part 1: {}\nPart 2: {}", blocks, screen.score);
+    println!(
+        "Part 1: {}\nPart 2: {}\nTime: {}ms",
+        blocks,
+        screen.score,
+        start_time.elapsed().as_millis()
+    );
 }
 
 fn _print_screen(screen: &mut Screen) {
     let mut output = screen.score.to_string();
-    
+
     for (y, x) in iproduct!((0..screen.height), (0..screen.width)) {
-        if x == 0 { output.push('\n'); }
+        if x == 0 {
+            output.push('\n');
+        }
         let coordinates = format!("({}, {})", x, y);
         output.push(match screen.tiles.get(&coordinates) {
             Some(1) => '#',

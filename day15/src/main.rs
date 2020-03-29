@@ -5,26 +5,25 @@
 
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::{Hash, Hasher};
-use std::process;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
 
 use intcode;
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     let program = intcode::load_program("day15/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
     let mut computer = intcode::Computer::new(&program, in_recv, out_send);
-    thread::spawn(move || {
+    std::thread::spawn(move || {
         computer.run().unwrap_or_else(|e| {
             println!("Computer failed: {}", e);
-            process::exit(1);
+            std::process::exit(1);
         });
     });
 
@@ -35,8 +34,10 @@ fn main() {
     let oxygen_distance = search_maze(&ship.grid, ship.oxygen_system, None);
 
     println!(
-        "Part 1: {}\nPart 2: {}",
-        distance_to_oxygen_system, oxygen_distance
+        "Part 1: {}\nPart 2: {}\nTime: {}ms",
+        distance_to_oxygen_system,
+        oxygen_distance,
+        start_time.elapsed().as_millis()
     );
 }
 
@@ -69,10 +70,10 @@ impl PartialEq for BFSState {
 }
 impl Eq for BFSState {}
 
-impl Hash for BFSState {
+impl std::hash::Hash for BFSState {
     fn hash<H>(&self, state: &mut H)
     where
-        H: Hasher,
+        H: std::hash::Hasher,
     {
         self.pos.hash(state);
     }
@@ -133,7 +134,7 @@ fn search_maze(grid: &[Vec<char>], from: Position, stop_at: Option<Position>) ->
     max_distance
 }
 
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 enum Direction {
     North,
     East,

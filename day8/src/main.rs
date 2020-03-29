@@ -3,18 +3,17 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
-use std::io;
-use std::io::Read;
-use std::fs::File;
-use std::process;
+use std::io::{self, Read};
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     let width = 25;
     let height = 6;
 
     let image = load_image(width, height).unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     let mut layers_data: Vec<[i32; 3]> = Vec::new();
@@ -40,17 +39,30 @@ fn main() {
 
     let mut picture = String::new();
     for i in 0..(width * height) {
-        if i % width == 0 { picture.push('\n'); }
+        if i % width == 0 {
+            picture.push('\n');
+        }
         for layer in &image.layers {
             match layer[i] {
-                0 => { picture.push(' '); break; },
-                1 => { picture.push('*'); break; },
-                _ => ()
+                0 => {
+                    picture.push(' ');
+                    break;
+                }
+                1 => {
+                    picture.push('*');
+                    break;
+                }
+                _ => (),
             }
-        }        
+        }
     }
 
-    println!("Part 1: {}\nPart 2: {}", score, picture);
+    println!(
+        "Part 1: {}\nPart 2: {}\nTime: {}ms",
+        score,
+        picture,
+        start_time.elapsed().as_millis()
+    );
 }
 
 struct Image {
@@ -71,24 +83,29 @@ impl Image {
     }
 
     fn new_layer(&mut self) {
-        self.layers.push(Vec::with_capacity(self.width * self.height));
+        self.layers
+            .push(Vec::with_capacity(self.width * self.height));
     }
 
     fn add_pixel(&mut self, pixel: i32) {
-        if self.layers.last().unwrap().len() == (self.width * self.height) { self.new_layer(); }
+        if self.layers.last().unwrap().len() == (self.width * self.height) {
+            self.new_layer();
+        }
         self.layers.last_mut().unwrap().push(pixel);
     }
 }
 
 fn load_image(width: usize, height: usize) -> Result<Image, io::Error> {
-    let mut input = File::open("day8/input.txt")?;
+    let mut input = std::fs::File::open("day8/input.txt")?;
     let mut data = String::new();
     input.read_to_string(&mut data)?;
 
     let mut image = Image::new(width, height);
-    data.chars().map(|c| c.to_digit(10).unwrap()).for_each(|digit| {
-        image.add_pixel(digit as i32);
-    });
+    data.chars()
+        .map(|c| c.to_digit(10).unwrap())
+        .for_each(|digit| {
+            image.add_pixel(digit as i32);
+        });
 
     Ok(image)
 }

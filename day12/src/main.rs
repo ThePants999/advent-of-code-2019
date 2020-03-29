@@ -2,7 +2,8 @@ use std::cell::RefCell;
 
 extern crate num;
 extern crate primes;
-#[macro_use] extern crate itertools;
+#[macro_use]
+extern crate itertools;
 
 fn simulate(moons: &[RefCell<MoonDimension>]) -> u64 {
     let moons = moons.to_owned();
@@ -11,14 +12,18 @@ fn simulate(moons: &[RefCell<MoonDimension>]) -> u64 {
     loop {
         perform_step(&moons);
         steps += 1;
-        if moons == initial_state { break steps; }
+        if moons == initial_state {
+            break steps;
+        }
     }
 }
 
 fn perform_step(moons: &[RefCell<MoonDimension>]) {
     for this_moon_cell in moons {
         for other_moon_cell in moons {
-            if this_moon_cell as *const _ == other_moon_cell as *const _ { continue; }
+            if this_moon_cell as *const _ == other_moon_cell as *const _ {
+                continue;
+            }
             calc_vel_change(this_moon_cell, other_moon_cell);
         }
     }
@@ -27,11 +32,18 @@ fn perform_step(moons: &[RefCell<MoonDimension>]) {
     }
 }
 
-fn calc_vel_change(this_moon_cell: &RefCell<MoonDimension>, other_moon_cell: &RefCell<MoonDimension>) {
+fn calc_vel_change(
+    this_moon_cell: &RefCell<MoonDimension>,
+    other_moon_cell: &RefCell<MoonDimension>,
+) {
     let mut this_moon = this_moon_cell.borrow_mut();
     let other_moon = other_moon_cell.borrow();
-    if other_moon.pos > this_moon.pos { this_moon.vel += 1; }
-    if other_moon.pos < this_moon.pos { this_moon.vel -= 1; }
+    if other_moon.pos > this_moon.pos {
+        this_moon.vel += 1;
+    }
+    if other_moon.pos < this_moon.pos {
+        this_moon.vel -= 1;
+    }
 }
 
 fn apply_vel_change(moon_cell: &RefCell<MoonDimension>) {
@@ -40,24 +52,26 @@ fn apply_vel_change(moon_cell: &RefCell<MoonDimension>) {
 }
 
 fn main() {
+    let start_time = std::time::Instant::now();
+
     let dimensions = vec![
         vec![
-            RefCell::new(MoonDimension { pos: -10, vel: 0, }),
-            RefCell::new(MoonDimension { pos: 5, vel: 0, }),
-            RefCell::new(MoonDimension { pos: 3, vel: 0, }),
-            RefCell::new(MoonDimension { pos: 1, vel: 0, }),
+            RefCell::new(MoonDimension { pos: -10, vel: 0 }),
+            RefCell::new(MoonDimension { pos: 5, vel: 0 }),
+            RefCell::new(MoonDimension { pos: 3, vel: 0 }),
+            RefCell::new(MoonDimension { pos: 1, vel: 0 }),
         ],
         vec![
-            RefCell::new(MoonDimension { pos: -10, vel: 0, }),
-            RefCell::new(MoonDimension { pos: 5, vel: 0, }),
-            RefCell::new(MoonDimension { pos: 8, vel: 0, }),
-            RefCell::new(MoonDimension { pos: 3, vel: 0, }),
+            RefCell::new(MoonDimension { pos: -10, vel: 0 }),
+            RefCell::new(MoonDimension { pos: 5, vel: 0 }),
+            RefCell::new(MoonDimension { pos: 8, vel: 0 }),
+            RefCell::new(MoonDimension { pos: 3, vel: 0 }),
         ],
         vec![
-            RefCell::new(MoonDimension { pos: -13, vel: 0, }),
-            RefCell::new(MoonDimension { pos: -9, vel: 0, }),
-            RefCell::new(MoonDimension { pos: -16, vel: 0, }),
-            RefCell::new(MoonDimension { pos: -3, vel: 0, }),
+            RefCell::new(MoonDimension { pos: -13, vel: 0 }),
+            RefCell::new(MoonDimension { pos: -9, vel: 0 }),
+            RefCell::new(MoonDimension { pos: -16, vel: 0 }),
+            RefCell::new(MoonDimension { pos: -3, vel: 0 }),
         ],
     ];
 
@@ -70,7 +84,10 @@ fn main() {
             perform_step(dimension);
         }
     }
-    let total_energy: i32 = transpose_data(&part_1_data).iter().map(Moon::total_energy).sum();
+    let total_energy: i32 = transpose_data(&part_1_data)
+        .iter()
+        .map(Moon::total_energy)
+        .sum();
 
     // Part 2
     let mut steps = Vec::new();
@@ -79,11 +96,22 @@ fn main() {
     }
     let iterations_to_reset = lowest_common_multiple(steps);
 
-    println!("Part 1: {}\nPart 2: {}", total_energy, iterations_to_reset);
+    println!(
+        "Part 1: {}\nPart 2: {}\nTime: {}ms",
+        total_energy,
+        iterations_to_reset,
+        start_time.elapsed().as_millis()
+    );
 }
 
 fn transpose_data(data: &[Vec<RefCell<MoonDimension>>]) -> Vec<Moon> {
-    izip!(data[0].clone(), data[1].clone(), data[2].clone()).map(|(x, y, z)| Moon { x: x.into_inner(), y: y.into_inner(), z: z.into_inner() }).collect()
+    izip!(data[0].clone(), data[1].clone(), data[2].clone())
+        .map(|(x, y, z)| Moon {
+            x: x.into_inner(),
+            y: y.into_inner(),
+            z: z.into_inner(),
+        })
+        .collect()
 }
 
 fn lowest_common_multiple(nums: Vec<u64>) -> u64 {
@@ -104,9 +132,13 @@ fn lowest_common_multiple(nums: Vec<u64>) -> u64 {
         for factor_set in &prime_factors {
             let mut count = 0;
             for factor in factor_set {
-                if *factor == unique_factor { count += 1; }
+                if *factor == unique_factor {
+                    count += 1;
+                }
             }
-            if count > max_count { max_count = count; }
+            if count > max_count {
+                max_count = count;
+            }
         }
         lcm *= num::pow::pow(unique_factor, max_count);
     }
