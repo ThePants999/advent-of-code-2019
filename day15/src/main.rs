@@ -1,23 +1,26 @@
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
+use std::cmp::{max, min};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::process;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use intcode;
-#[macro_use] extern crate itertools;
-extern crate rand;
-use rand::{thread_rng, Rng};
 
 fn main() {
-    let memory = intcode::load_program("day15/input.txt").unwrap_or_else(|err| {
+    let program = intcode::load_program("day15/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
         process::exit(1);
     });
 
-    let (in_send, in_recv) = channel();
-    let (out_send, out_recv) = channel();
-    let mut computer = intcode::Computer::new(&memory, in_recv, out_send);
+    let (in_send, in_recv) = mpsc::channel();
+    let (out_send, out_recv) = mpsc::channel();
+    let mut computer = intcode::Computer::new(&program, in_recv, out_send);
     thread::spawn(move || {
         computer.run().unwrap_or_else(|e| {
             println!("Computer failed: {}", e);
@@ -25,172 +28,367 @@ fn main() {
         });
     });
 
-    let mut ship = Ship {
-        map: HashMap::new(),
-        oxy: HashSet::new(),
-        min_x: 0,
-        max_x: 0,
-        min_y: 0,
-        max_y: 0,
-    };
-    let mut droid_x: i64 = 0;
-    let mut droid_y: i64 = 0;
-    ship.map.insert(String::from("(0, 0)"), '.');
-    let mut moves_since_new_info = 0;
+    let mut droid = Droid::new(in_send, out_recv);
+    let ship = droid.explore_ship();
 
-    loop {
-        let input = choose_direction(&ship, droid_x, droid_y);
-        let (target_x, target_y) = match input {
-            1 => (droid_x, droid_y - 1),
-            2 => (droid_x, droid_y + 1),
-            3 => (droid_x - 1, droid_y),
-            4 => (droid_x + 1, droid_y),
-            _ => panic!("RNG not working!"),
-        };
-        in_send.send(input).unwrap();
-        let val = match out_recv.recv().unwrap() {
-            0 => '#',
-            1 => {
-                droid_x = target_x;
-                droid_y = target_y;
-                '.'
-            },
-            2 => {
-                droid_x = target_x;
-                droid_y = target_y;
-                ship.oxy.insert((target_x, target_y));
-                'O'
-            },
-            _ => panic!("Invalid output from computer"),
-        };
+    let distance_to_oxygen_system = search_maze(&ship.grid, ship.start, Some(ship.oxygen_system));
+    let oxygen_distance = search_maze(&ship.grid, ship.oxygen_system, None);
 
-        if update_map(&mut ship, target_x, target_y, val) {
-            moves_since_new_info = 0;
-        } else {
-            moves_since_new_info += 1;
-            if moves_since_new_info == 100_000 { break; }
-        }
-    }
+    println!(
+        "Part 1: {}\nPart 2: {}",
+        distance_to_oxygen_system, oxygen_distance
+    );
+}
 
-    print_map(&ship);
-
-    let mut minutes = 0;
-    loop {
-        minutes += 1;
-        let current_oxy = ship.oxy.clone();
-        for (x, y) in current_oxy {
-            if !spread_oxygen(&mut ship, x, y) {
-                ship.oxy.remove(&(x, y));
+fn _print_ship(ship: &Ship) {
+    for row in 0..ship.grid.len() {
+        for col in 0..ship.grid[row].len() {
+            if row == ship.start.row as usize && col == ship.start.col as usize {
+                print!("D");
+            } else if row == ship.oxygen_system.row as usize
+                && col == ship.oxygen_system.col as usize
+            {
+                print!("O");
+            } else {
+                print!("{}", ship.grid[row][col]);
             }
         }
+        println!();
+    }
+}
 
-        if ship.map.values().filter(|val| **val == '.').count() == 0 {
+struct BFSState {
+    pos: Position,
+    distance: usize,
+}
+
+impl PartialEq for BFSState {
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos
+    }
+}
+impl Eq for BFSState {}
+
+impl Hash for BFSState {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        self.pos.hash(state);
+    }
+}
+
+// Perform a breadth-first search of a supplied maze from a given starting point.
+// If `stop_at` is provided, returns the length of the shortest path to that point.
+// Otherwise, returns the length of the longest shortest path to any point.
+fn search_maze(grid: &[Vec<char>], from: Position, stop_at: Option<Position>) -> usize {
+    let mut queue = VecDeque::new();
+    let mut seen_states = HashSet::new();
+    let mut max_distance = 0;
+    queue.push_back(BFSState {
+        pos: from,
+        distance: 0,
+    });
+
+    while !queue.is_empty() {
+        let state = queue.pop_front().unwrap();
+
+        // Backtrack if we've been here before.
+        if seen_states.contains(&state) {
+            continue;
+        }
+
+        // Backtrack if we've walked into a wall.
+        if grid[state.pos.row as usize][state.pos.col as usize] == '#' {
+            continue;
+        }
+
+        if state.distance > max_distance {
+            max_distance = state.distance;
+        }
+
+        // Stop if we've reached the target.
+        if stop_at.is_some() && state.pos == stop_at.unwrap() {
             break;
         }
 
-        //print_map(&ship);
+        // We're good, so add all adjacent positions to the queue.
+        let adjacent_positions = [
+            state.pos + &Direction::North,
+            state.pos + &Direction::South,
+            state.pos + &Direction::West,
+            state.pos + &Direction::East,
+        ];
+        for pos in &adjacent_positions {
+            queue.push_back(BFSState {
+                pos: *pos,
+                distance: state.distance + 1,
+            });
+        }
+
+        // Remember that we've been here.
+        seen_states.insert(state);
     }
-    
-    println!("Minutes: {}", minutes);
+
+    max_distance
 }
 
-fn spread_oxygen(ship: &mut Ship, x: i64, y: i64) -> bool {
-    try_spread_oxygen(ship, x, y - 1) |
-    try_spread_oxygen(ship, x, y + 1) |
-    try_spread_oxygen(ship, x - 1, y) |
-    try_spread_oxygen(ship, x + 1, y)
+#[derive(Clone,Copy)]
+enum Direction {
+    North,
+    East,
+    South,
+    West,
 }
 
-fn try_spread_oxygen(ship: &mut Ship, x: i64, y: i64) -> bool {
-    match consider_target(ship, x, y, true) {
-        TargetStates::Visited => {
-            ship.oxy.insert((x, y));
-            update_map(ship, x, y, 'O');
-            true
-        },
-        _ => false,
-    }
-}
-
-fn choose_direction(ship: &Ship, droid_x: i64, droid_y: i64) -> i64 {
-    let mut non_visited_dirs = Vec::new();
-    let mut visited_dirs = Vec::new();
-    match consider_target(ship, droid_x, droid_y - 1, false) {
-        TargetStates::NotVisited => non_visited_dirs.push(1),
-        TargetStates::Visited => visited_dirs.push(1),
-        TargetStates::Blocked => (),
-    };
-    match consider_target(ship, droid_x, droid_y + 1, false) {
-        TargetStates::NotVisited => non_visited_dirs.push(2),
-        TargetStates::Visited => visited_dirs.push(2),
-        TargetStates::Blocked => (),
-    };
-    match consider_target(ship, droid_x - 1, droid_y, false) {
-        TargetStates::NotVisited => non_visited_dirs.push(3),
-        TargetStates::Visited => visited_dirs.push(3),
-        TargetStates::Blocked => (),
-    };
-    match consider_target(ship, droid_x + 1, droid_y, false) {
-        TargetStates::NotVisited => non_visited_dirs.push(4),
-        TargetStates::Visited => visited_dirs.push(4),
-        TargetStates::Blocked => (),
-    };
-    if non_visited_dirs.is_empty() {
-        visited_dirs[thread_rng().gen_range(0, visited_dirs.len())]
-    } else {
-        non_visited_dirs[thread_rng().gen_range(0, non_visited_dirs.len())]
-    }
-}
-
-enum TargetStates {
-    NotVisited,
-    Visited,
-    Blocked,
-}
-
-fn consider_target(ship: &Ship, x: i64, y: i64, oxygen: bool) -> TargetStates {
-    let coordinates = format!("({}, {})", x, y);
-    match ship.map.get(&coordinates) {
-        Some('#') => TargetStates::Blocked,
-        Some('O') if oxygen => TargetStates::Blocked,
-        None => TargetStates::NotVisited,
-        _ => TargetStates::Visited,
-    }
-}
-
-// Returns true if this was new information.
-fn update_map(ship: &mut Ship, x: i64, y: i64, val: char) -> bool {
-    let coordinates = format!("({}, {})", x, y);
-    if x > ship.max_x { ship.max_x = x; }
-    if x < ship.min_x { ship.min_x = x; }
-    if y > ship.max_y { ship.max_y = y; }
-    if y < ship.min_y { ship.min_y = y; }
-    ship.map.insert(coordinates, val).is_none()
-}
-
-struct Ship {
-    map: HashMap<String, char>,
-    oxy: HashSet<(i64, i64)>,
-    min_x: i64,
-    max_x: i64,
-    min_y: i64,
-    max_y: i64,
-}
-
-fn print_map(ship: &Ship) { //, droid_x: i64, droid_y: i64) {
-    let mut drawing = String::new();
-    for (y, x) in iproduct!((ship.min_y..=ship.max_y), (ship.min_x..=ship.max_x)) {
-        if x == ship.min_x { drawing.push('\n'); }
-        //if (x == droid_x) && (y == droid_y) { drawing.push('D'); continue; }
-        //if (x == 0) && (y == 0) { drawing.push('O'); continue; }
-        let coordinates = format!("({}, {})", x, y);
-        match ship.map.get(&coordinates) {
-            Some(c) => drawing.push(*c),
-            None => drawing.push(' '),
+impl Direction {
+    fn turn_right(self) -> Self {
+        match self {
+            Self::North => Self::East,
+            Self::East => Self::South,
+            Self::South => Self::West,
+            Self::West => Self::North,
         }
     }
 
-    //let mut file = File::create("day15/output.txt").unwrap();
-    //file.write_all(drawing.as_bytes()).unwrap();
-    println!("{}", drawing);
+    fn turn_left(self) -> Self {
+        match self {
+            Self::North => Self::West,
+            Self::West => Self::South,
+            Self::South => Self::East,
+            Self::East => Self::North,
+        }
+    }
+
+    fn input(self) -> i64 {
+        match self {
+            Self::North => 1,
+            Self::South => 2,
+            Self::West => 3,
+            Self::East => 4,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct Position {
+    row: isize,
+    col: isize,
+}
+
+impl Position {
+    fn origin() -> Self {
+        Self { row: 0, col: 0 }
+    }
+
+    fn extend_min(&mut self, other: &Self) {
+        self.row = min(self.row, other.row);
+        self.col = min(self.col, other.col);
+    }
+
+    fn extend_max(&mut self, other: &Self) {
+        self.row = max(self.row, other.row);
+        self.col = max(self.col, other.col);
+    }
+}
+
+impl std::ops::Add for Position {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            row: self.row + other.row,
+            col: self.col + other.col,
+        }
+    }
+}
+
+impl std::ops::Sub for Position {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self {
+            row: self.row - other.row,
+            col: self.col - other.col,
+        }
+    }
+}
+
+impl std::ops::Add<&Direction> for Position {
+    type Output = Self;
+
+    #[allow(clippy::suspicious_arithmetic_impl)]
+    fn add(self, other: &Direction) -> Self {
+        match other {
+            Direction::North => Self {
+                row: self.row - 1,
+                col: self.col,
+            },
+            Direction::South => Self {
+                row: self.row + 1,
+                col: self.col,
+            },
+            Direction::West => Self {
+                row: self.row,
+                col: self.col - 1,
+            },
+            Direction::East => Self {
+                row: self.row,
+                col: self.col + 1,
+            },
+        }
+    }
+}
+
+enum MoveResult {
+    Wall,
+    Corridor,
+    OxygenSystem,
+}
+
+impl MoveResult {
+    fn from(output: i64) -> Self {
+        match output {
+            0 => Self::Wall,
+            1 => Self::Corridor,
+            2 => Self::OxygenSystem,
+            _ => panic!("Unexpected output from computer: {}", output),
+        }
+    }
+}
+
+// A repository of information about a ship layout that we've learned so far.
+struct LearnedShipInfo {
+    // All the grid locations we've learned about.
+    map: HashMap<Position, char>,
+
+    // The location of the oxygen system.
+    oxygen_system: Position,
+
+    // The relative co-ordinates of the most top-left position we know about.
+    min_pos: Position,
+
+    // The relative co-ordinates of the most bottom-right position we know about.
+    max_pos: Position,
+
+    // Whether, in exploring this ship, we've moved away from the starting point.
+    // We store this because we're finished when we return to the starting point.
+    moved_off_starting_pos: bool,
+}
+
+impl LearnedShipInfo {
+    fn new() -> Self {
+        let mut info = Self {
+            map: HashMap::new(),
+            oxygen_system: Position::origin(),
+            min_pos: Position::origin(),
+            max_pos: Position::origin(),
+            moved_off_starting_pos: false,
+        };
+        info.map.insert(Position::origin(), '.');
+        info
+    }
+}
+
+// Complete information about the ship layout.
+struct Ship {
+    // A visual representation of the ship layout, as a 2-D vector (row, then column).
+    grid: Vec<Vec<char>>,
+
+    // The droid's starting location in the ship.
+    start: Position,
+
+    // The location of the oxygen system.
+    oxygen_system: Position,
+}
+
+impl Ship {
+    fn construct(info: LearnedShipInfo) -> Self {
+        let width = (info.max_pos.col - info.min_pos.col + 1) as usize;
+        let height = (info.max_pos.row - info.min_pos.row + 1) as usize;
+        let delta = Position::origin() - info.min_pos;
+
+        let mut grid: Vec<Vec<char>> =
+            std::iter::repeat(std::iter::repeat(' ').take(height).collect())
+                .take(width)
+                .collect();
+
+        for (pos, c) in info.map {
+            let adjusted_pos = pos + delta;
+            grid[adjusted_pos.row as usize][adjusted_pos.col as usize] = c;
+        }
+
+        Self {
+            grid,
+            start: delta,
+            oxygen_system: info.oxygen_system + delta,
+        }
+    }
+}
+
+// Our representation of the droid that's exploring the ship, with which we
+// indirectly communicate via the Intcode computer.
+struct Droid {
+    // The droid's current location in the ship.
+    pos: Position,
+
+    // A channel to send instructions to the computer for moving the droid.
+    tx: Sender<i64>,
+
+    // A channel to receive movement results from the computer.
+    rx: Receiver<i64>,
+}
+
+impl Droid {
+    fn new(tx: Sender<i64>, rx: Receiver<i64>) -> Self {
+        Self {
+            pos: Position { row: 0, col: 0 },
+            tx,
+            rx,
+        }
+    }
+
+    // Fully explore the ship.
+    // Implements a basic "wall follower" algorithm, right-hand rule.
+    fn explore_ship(&mut self) -> Ship {
+        let mut learned_info = LearnedShipInfo::new();
+        let mut dir = Direction::North;
+        let origin = Position::origin();
+
+        while !learned_info.moved_off_starting_pos || self.pos != origin {
+            dir = self.attempt_move(&mut learned_info, dir);
+        }
+
+        Ship::construct(learned_info)
+    }
+
+    // Try to move in the specified direction, record what we learn by so doing,
+    // and decide which direction to move in next. We simulate the droid keeping
+    // its right hand on a wall at all times, so it tries to turn right if it
+    // successfully moves forwards, and left if it hits a wall.
+    fn attempt_move(&mut self, info: &mut LearnedShipInfo, dir: Direction) -> Direction {
+        let target_pos = self.pos + &dir;
+
+        self.tx.send(dir.input()).unwrap();
+        let (map_char, new_dir, moved) = match MoveResult::from(self.rx.recv().unwrap()) {
+            MoveResult::Wall => ('#', dir.turn_left(), false),
+            MoveResult::Corridor => ('.', dir.turn_right(), true),
+            MoveResult::OxygenSystem => {
+                info.oxygen_system = target_pos;
+                ('.', dir.turn_right(), true)
+            }
+        };
+
+        info.min_pos.extend_min(&target_pos);
+        info.max_pos.extend_max(&target_pos);
+
+        if moved {
+            self.pos = target_pos;
+            info.moved_off_starting_pos = true;
+        }
+
+        info.map.insert(target_pos, map_char);
+
+        new_dir
+    }
 }
