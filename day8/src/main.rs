@@ -50,7 +50,7 @@ fn main() {
         }        
     }
 
-    println!("{}{}", score, picture);
+    println!("Part 1: {}\nPart 2: {}", score, picture);
 }
 
 struct Image {
@@ -87,7 +87,6 @@ fn load_image(width: usize, height: usize) -> Result<Image, io::Error> {
 
     let mut image = Image::new(width, height);
     data.chars().map(|c| c.to_digit(10).unwrap()).for_each(|digit| {
-    //ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid character found in input data: {}", c)))?
         image.add_pixel(digit as i32);
     });
 

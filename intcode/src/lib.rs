@@ -307,8 +307,12 @@ impl Computer {
         Ok(())
     }
 
-    // Safely retrieve the data at a given memory address.
-    fn fetch_from_address(&self, address: usize) -> Result<i64, String> {
+    /// Safely retrieves the data at a given memory address.
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if the specified address is outside of the computer's memory.
+    pub fn fetch_from_address(&self, address: usize) -> Result<i64, String> {
         self.check_address(address).map(|_| self.memory[address])
     }
 }

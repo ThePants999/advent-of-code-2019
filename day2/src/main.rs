@@ -11,14 +11,24 @@ fn main() {
         process::exit(1);
     });
 
+    let mut memory_copy = memory.clone();
+    memory_copy[1] = 12;
+    memory_copy[2] = 2;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut computer = intcode::Computer::new(&memory_copy, rx, tx);
+    computer.run().unwrap();
+    println!("Part 1: {}", computer.fetch_from_address(0).unwrap());
+
     for (noun, verb) in iproduct!(0..memory.len(), 0..memory.len()) {
         let mut memory_copy = memory.clone();
         memory_copy[1] = noun as i64;
         memory_copy[2] = verb as i64;
-        let _ = intcode::run_computer(&memory_copy, &Vec::new());
-        if memory_copy[0] == TARGET {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut computer = intcode::Computer::new(&memory_copy, rx, tx);
+        computer.run().unwrap();
+        if computer.fetch_from_address(0).unwrap() == TARGET {
             let answer = (noun * 100) + verb;
-            println!("{}", answer);
+            println!("Part 2: {}", answer);
             break;
         }
     }

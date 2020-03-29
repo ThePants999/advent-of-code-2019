@@ -1,12 +1,11 @@
 use std::cell::RefCell;
-use std::thread;
-use std::sync::mpsc;
 
 extern crate num;
 extern crate primes;
+#[macro_use] extern crate itertools;
 
-#[allow(clippy::needless_pass_by_value)]
-fn simulate(moons: Vec<RefCell<MoonDimension>>) -> u64 {
+fn simulate(moons: &[RefCell<MoonDimension>]) -> u64 {
+    let moons = moons.to_owned();
     let initial_state = moons.clone();
     let mut steps = 0;
     loop {
@@ -18,24 +17,25 @@ fn simulate(moons: Vec<RefCell<MoonDimension>>) -> u64 {
 
 fn perform_step(moons: &[RefCell<MoonDimension>]) {
     for this_moon_cell in moons {
-        let mut this_moon = this_moon_cell.borrow_mut();
         for other_moon_cell in moons {
             if this_moon_cell as *const _ == other_moon_cell as *const _ { continue; }
-            calc_vel_change(&mut this_moon, &other_moon_cell.borrow());
+            calc_vel_change(this_moon_cell, other_moon_cell);
         }
     }
     for this_moon_cell in moons {
-        let mut this_moon = this_moon_cell.borrow_mut();
-        apply_vel_change(&mut this_moon);
+        apply_vel_change(this_moon_cell);
     }
 }
 
-fn calc_vel_change(this_moon: &mut MoonDimension, other_moon: &MoonDimension) {
+fn calc_vel_change(this_moon_cell: &RefCell<MoonDimension>, other_moon_cell: &RefCell<MoonDimension>) {
+    let mut this_moon = this_moon_cell.borrow_mut();
+    let other_moon = other_moon_cell.borrow();
     if other_moon.pos > this_moon.pos { this_moon.vel += 1; }
     if other_moon.pos < this_moon.pos { this_moon.vel -= 1; }
 }
 
-fn apply_vel_change(moon: &mut MoonDimension) {
+fn apply_vel_change(moon_cell: &RefCell<MoonDimension>) {
+    let mut moon = moon_cell.borrow_mut();
     moon.pos += moon.vel;
 }
 
@@ -61,21 +61,29 @@ fn main() {
         ],
     ];
 
-    let mut channels = Vec::new();
-    for dimension in dimensions {
-        let (tx, rx) = mpsc::channel();
-        channels.push(rx);
-        thread::spawn(move || {
-            tx.send(simulate(dimension)).unwrap();
-        });
-    }
+    let part_1_data = dimensions.clone();
+    let part_2_data = dimensions;
 
+    // Part 1
+    for _ in 0..1_000 {
+        for dimension in &part_1_data {
+            perform_step(dimension);
+        }
+    }
+    let total_energy: i32 = transpose_data(&part_1_data).iter().map(Moon::total_energy).sum();
+
+    // Part 2
     let mut steps = Vec::new();
-    for rx in channels {
-        steps.push(rx.recv().unwrap());
+    for dimension in &part_2_data {
+        steps.push(simulate(dimension));
     }
+    let iterations_to_reset = lowest_common_multiple(steps);
 
-    println!("{}", lowest_common_multiple(steps));
+    println!("Part 1: {}\nPart 2: {}", total_energy, iterations_to_reset);
+}
+
+fn transpose_data(data: &[Vec<RefCell<MoonDimension>>]) -> Vec<Moon> {
+    izip!(data[0].clone(), data[1].clone(), data[2].clone()).map(|(x, y, z)| Moon { x: x.into_inner(), y: y.into_inner(), z: z.into_inner() }).collect()
 }
 
 fn lowest_common_multiple(nums: Vec<u64>) -> u64 {
@@ -106,28 +114,28 @@ fn lowest_common_multiple(nums: Vec<u64>) -> u64 {
     lcm
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct MoonDimension {
     pos: i32,
     vel: i32,
-    // pos_x: i32,
-    // pos_y: i32,
-    // pos_z: i32,
-    // vel_x: i32,
-    // vel_y: i32,
-    // vel_z: i32,
 }
 
-// impl Moon {
-//     fn potential_energy(&self) -> i32 {
-//         self.pos_x.abs() + self.pos_y.abs() + self.pos_z.abs()
-//     }
+struct Moon {
+    x: MoonDimension,
+    y: MoonDimension,
+    z: MoonDimension,
+}
 
-//     fn kinetic_energy(&self) -> i32 {
-//         self.vel_x.abs() + self.vel_y.abs() + self.vel_z.abs()
-//     }
+impl Moon {
+    fn potential_energy(&self) -> i32 {
+        self.x.pos.abs() + self.y.pos.abs() + self.z.pos.abs()
+    }
 
-//     fn total_energy(&self) -> i32 {
-//         self.potential_energy() * self.kinetic_energy()
-//     }
-// }
+    fn kinetic_energy(&self) -> i32 {
+        self.x.vel.abs() + self.y.vel.abs() + self.z.vel.abs()
+    }
+
+    fn total_energy(&self) -> i32 {
+        self.potential_energy() * self.kinetic_energy()
+    }
+}

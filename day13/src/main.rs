@@ -12,14 +12,23 @@ use intcode;
 #[macro_use] extern crate itertools;
 
 fn main() {
-    let memory = intcode::load_program("day13/input.txt").unwrap_or_else(|err| {
+    let mut program = intcode::load_program("day13/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
         process::exit(1);
     });
 
+    // Part 1
+    let outputs_part_1 = intcode::run_computer(&program, &[]).unwrap_or_else(|e| {
+        println!("Computer failed: {}", e);
+        process::exit(1);
+    });
+    let blocks = outputs_part_1.iter().skip(2).step_by(3).filter(|tile_id| **tile_id == 2).count();
+
+    // Part 2
+    program[0] = 2;
     let (in_send, in_recv) = channel();
     let (out_send, out_recv) = channel();
-    let mut computer = intcode::Computer::new(&memory, in_recv, out_send);
+    let mut computer = intcode::Computer::new(&program, in_recv, out_send);
     thread::spawn(move || {
         computer.run().unwrap_or_else(|e| {
             println!("Computer failed: {}", e);
@@ -76,14 +85,12 @@ fn main() {
                 _ => in_send.send(0).unwrap(),
             }
         }
-
-        print_screen(&mut screen);
     }
 
-    println!("{}", screen.score);
+    println!("Part 1: {}\nPart 2: {}", blocks, screen.score);
 }
 
-fn print_screen(screen: &mut Screen) {
+fn _print_screen(screen: &mut Screen) {
     let mut output = screen.score.to_string();
     
     for (y, x) in iproduct!((0..screen.height), (0..screen.width)) {

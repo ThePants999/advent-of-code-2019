@@ -8,8 +8,10 @@ fn main() {
         println!("Could not load input file!\n{:?}", err);
         process::exit(1);
     });
-    let total_fuel: i32 = modules.iter().copied().map(fuel_for_module).sum();
-    println!("Total fuel required: {}", total_fuel);
+    
+    let part_1_fuel: i32 = modules.iter().copied().map(fuel_for_weight).sum();
+    let part_2_fuel: i32 = modules.iter().copied().map(fuel_for_module).sum();
+    println!("Part 1: {}\nPart 2: {}", part_1_fuel, part_2_fuel);
 }
 
 fn load_modules() -> Result<Vec<i32>, io::Error> {

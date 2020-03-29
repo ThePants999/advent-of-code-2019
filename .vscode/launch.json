@@ -9,7 +9,7 @@
             "name": "(Windows) Launch",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceRoot}/target/debug/day3-2018.exe",
+            "program": "${workspaceRoot}/target/debug/day15.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

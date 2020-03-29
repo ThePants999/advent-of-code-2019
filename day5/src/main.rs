@@ -3,10 +3,19 @@ use std::process;
 use intcode;
 
 fn main() {
-    let outputs = intcode::load_and_run_computer("day5/input.txt", &[5]).unwrap_or_else(|e| {
+    let program = intcode::load_program("day5/input.txt").unwrap_or_else(|err| {
+        println!("Could not load input file!\n{:?}", err);
+        process::exit(1);
+    });
+
+    let outputs_part_1 = intcode::run_computer(&program, &[1]).unwrap_or_else(|e| {
+        println!("Computer failed: {}", e);
+        process::exit(1);
+    });
+    let outputs_part_2 = intcode::run_computer(&program, &[5]).unwrap_or_else(|e| {
         println!("Computer failed: {}", e);
         process::exit(1);
     });
 
-    println!("{:?}", outputs);
+    println!("Part 1: {}\nPart 2: {}", outputs_part_1[outputs_part_1.len() - 1], outputs_part_2[0]);
 }

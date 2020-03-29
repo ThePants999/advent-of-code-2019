@@ -7,14 +7,29 @@ use intcode;
 #[macro_use] extern crate itertools;
 
 fn main() {
-    let memory = intcode::load_program("day11/input.txt").unwrap_or_else(|err| {
+    let program = intcode::load_program("day11/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
         process::exit(1);
     });
 
+    let part_1_robot = run_paint_sequence(&program, false);
+    let part_2_robot = run_paint_sequence(&program, true);
+    let mut picture = String::new();
+    for (y, x) in iproduct!((part_2_robot.min_y..=part_2_robot.max_y), (part_2_robot.min_x..=part_2_robot.max_x)) {
+        if x == part_2_robot.min_x { picture.push('\n'); }
+        match part_2_robot.get_color_at(x, y) {
+            1 => picture.push('#'),
+            _ => picture.push(' '),
+        };
+    }
+
+    println!("Part 1: {}\nPart 2: {}", part_1_robot.count_painted_panels(), picture);
+}
+
+fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
     let (in_send, in_recv) = channel();
     let (out_send, out_recv) = channel();
-    let mut computer = intcode::Computer::new(&memory, in_recv, out_send);
+    let mut computer = intcode::Computer::new(program, in_recv, out_send);
     thread::spawn(move || {
         computer.run().unwrap_or_else(|e| {
             println!("Computer failed: {}", e);
@@ -23,7 +38,8 @@ fn main() {
     });
 
     let mut robot = Robot::new();
-    robot.paint(1);
+    if paint_current_panel { robot.paint(1); }
+
     loop {
         if in_send.send(robot.get_current_color()).is_err() { break; }
         match out_recv.recv() {
@@ -49,17 +65,7 @@ fn main() {
         };
     }
 
-    let mut picture = String::new();
-    for (y, x) in iproduct!((robot.min_y..=robot.max_y), (robot.min_x..=robot.max_x)) {
-        println!("({}, {})", x, y);
-        if x == robot.min_x { picture.push('\n'); }
-        match robot.get_color_at(x, y) {
-            1 => picture.push('#'),
-            _ => picture.push(' '),
-        };
-    }
-
-    println!("{}", picture);
+    robot
 }
 
 #[derive(Clone,Copy)]
@@ -100,10 +106,10 @@ impl Robot {
         }
     }
 
-    // fn count_painted_panels(&self) -> usize {
-    // This should use filter() and count(), not map() and sum().
-    //     self.panels.values().map(|panel| match panel.painted { false => 0, true => 1 }).sum()
-    // }
+    fn count_painted_panels(&self) -> usize {
+        //self.panels.values().map(|panel| match panel.painted { false => 0, true => 1 }).sum()
+        self.panels.values().filter(|panel| panel.painted).count()
+    }
 
     fn paint(&mut self, color: i64) {
         self.get_current_panel().paint(color);

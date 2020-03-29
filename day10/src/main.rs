@@ -36,8 +36,8 @@ fn main() {
         asteroids_destroyed += 1;
         let (final_x, final_y) = position_to_coords(&map, asteroid);
         let answer = (final_x * 100) + final_y;
-        if asteroids_destroyed > 200 {
-            println!("Part 2 answer: {}", answer);
+        if asteroids_destroyed == 200 {
+            println!("Part 2: {}", answer);
             break;
         }
     }
@@ -70,7 +70,7 @@ fn find_next_asteroid(map: &Map, angles: &[f64], last_angle: f64, allow_same_ang
         if !map.positions[*asteroid].asteroid { continue; } // Skip ones we've already blown up
         if !map.positions[*asteroid].visible { continue; } // Skip ones we can't see
         if angles[*asteroid] < last_angle { continue; } // It's counter-clockwise
-        if !allow_same_angle && ((angles[*asteroid] - last_angle) < std::f64::EPSILON) { continue; } // It's behind the last one
+        if !allow_same_angle && ((angles[*asteroid] - last_angle).abs() < std::f64::EPSILON) { continue; } // It's behind the last one
         if angles[*asteroid] > best_angle { continue; } // We've already found a better one
         next_asteroid = *asteroid;
         best_angle = angles[*asteroid];
@@ -158,7 +158,6 @@ fn find_best_position(map: &mut Map) -> usize {
         }
     }
 
-    //map.positions.clear();
     map.positions.copy_from_slice(&best_positions.unwrap());
 
     println!("Part 1: {}", most_visible_asteroids);
@@ -241,5 +240,5 @@ fn load_map() -> Result<Map, io::Error> {
         }
     }
 
-    Ok(Map { width, height, positions, asteroids})
+    Ok(Map { width, height, positions, asteroids })
 }

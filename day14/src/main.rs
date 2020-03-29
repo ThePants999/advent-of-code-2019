@@ -45,7 +45,6 @@ fn main() {
     });
 
     let ore_for_one_fuel = ore_cell.borrow().needed;
-    println!("ORE required for one FUEL: {}", ore_for_one_fuel);
 
     // That's a starting point for how much fuel we can generate with a trillion ORE,
     // but efficiencies will mean we can generate more. Iterate. Firstly, let's work on
@@ -70,7 +69,7 @@ fn main() {
         }
     }
 
-    println!("Fuel with a trillion ore: {}", fuel_amount);
+    println!("Part 1: {}\nPart 2: {}", ore_for_one_fuel, fuel_amount);
 }
 
 fn recalculate_requirements(chemical: &mut Chemical) {
