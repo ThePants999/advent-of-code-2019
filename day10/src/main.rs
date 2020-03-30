@@ -5,6 +5,8 @@
 
 use std::io::{self, Read};
 
+// Once again, today's code is verbose, but both performant and (hopefully) easy to follow.
+
 fn main() {
     let start_time = std::time::Instant::now();
 
