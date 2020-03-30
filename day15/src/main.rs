@@ -22,9 +22,14 @@ fn main() {
     let mut computer = intcode::Computer::new(&program, in_recv, out_send);
     std::thread::spawn(move || { computer.run(); });
 
+    // Firstly, use the droid (via the Intcode computer) to construct a map of the entire ship.
+    // Part 1 doesn't require that, but part 2 does, and having it up front makes part 1 simpler.
     let mut droid = Droid::new(in_send, out_recv);
     let ship = droid.explore_ship();
 
+    // Now we can use the completed map to solve both parts via breadth-first search.  Part 1 is
+    // shortest path from origin to oxygen system; part 2 is the "longest shortest path" from the
+    // oxygen system, i.e. the shortest path to the furthest-away point.
     let distance_to_oxygen_system = search_maze(&ship.grid, ship.start, Some(ship.oxygen_system));
     let oxygen_distance = search_maze(&ship.grid, ship.oxygen_system, None);
 
