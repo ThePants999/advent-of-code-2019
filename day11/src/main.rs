@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
+use std::cmp;
 
 use intcode;
 #[macro_use]
@@ -15,19 +16,7 @@ fn main() {
 
     let part_1_robot = run_paint_sequence(&program, false);
     let part_2_robot = run_paint_sequence(&program, true);
-    let mut picture = String::new();
-    for (y, x) in iproduct!(
-        (part_2_robot.min_y..=part_2_robot.max_y),
-        (part_2_robot.min_x..=part_2_robot.max_x)
-    ) {
-        if x == part_2_robot.min_x {
-            picture.push('\n');
-        }
-        match part_2_robot.get_color_at(x, y) {
-            1 => picture.push('#'),
-            _ => picture.push(' '),
-        };
-    }
+    let picture = part_2_robot.draw_painting();
 
     println!(
         "Part 1: {}\nPart 2: {}\nTime: {}ms",
@@ -41,7 +30,9 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
     let mut computer = intcode::Computer::new(program, in_recv, out_send);
-    std::thread::spawn(move || { computer.run(); });
+    std::thread::spawn(move || {
+        computer.run();
+    });
 
     let mut robot = Robot::new();
     if paint_current_panel {
@@ -55,21 +46,15 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
         match out_recv.recv() {
             Ok(val) => match val {
                 0 | 1 => robot.paint(val),
-                _ => {
-                    println!("Invalid paint instruction received: {}", val);
-                    std::process::exit(1);
-                }
+                _ => unreachable!("Invalid paint instruction received: {}", val),
             },
             Err(_) => break,
         };
         match out_recv.recv() {
             Ok(val) => match val {
-                0 => robot.turn_and_move(Turns::Left),
-                1 => robot.turn_and_move(Turns::Right),
-                _ => {
-                    println!("Invalid turn instruction received: {}", val);
-                    std::process::exit(1);
-                }
+                0 => robot.turn_and_move(Turn::Left),
+                1 => robot.turn_and_move(Turn::Right),
+                _ => unreachable!("Invalid turn instruction received: {}", val),
             },
             Err(_) => break,
         };
@@ -79,27 +64,43 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
 }
 
 #[derive(Clone, Copy)]
-enum Turns {
+enum Turn {
     Left,
     Right,
 }
 
-enum Directions {
+#[derive(Clone, Copy)]
+enum Direction {
     Up,
     Down,
     Left,
     Right,
 }
 
+impl Direction {
+    fn turn(self, turn: Turn) -> Self {
+        match turn {
+            Turn::Left => match self {
+                Self::Up => Self::Left,
+                Self::Left => Self::Down,
+                Self::Down => Self::Right,
+                Self::Right => Self::Up,
+            },
+            Turn::Right => match self {
+                Self::Up => Self::Right,
+                Self::Right => Self::Down,
+                Self::Down => Self::Left,
+                Self::Left => Self::Up,
+            },
+        }
+    }
+}
+
 struct Robot {
     x: isize,
     y: isize,
-    min_x: isize,
-    min_y: isize,
-    max_x: isize,
-    max_y: isize,
-    dir: Directions,
-    panels: HashMap<String, Panel>,
+    dir: Direction,
+    panels: HashMap<(isize, isize), Panel>,
 }
 
 impl Robot {
@@ -107,17 +108,12 @@ impl Robot {
         Self {
             x: 0,
             y: 0,
-            min_x: 0,
-            min_y: 0,
-            max_x: 0,
-            max_y: 0,
-            dir: Directions::Up,
+            dir: Direction::Up,
             panels: HashMap::new(),
         }
     }
 
     fn count_painted_panels(&self) -> usize {
-        //self.panels.values().map(|panel| match panel.painted { false => 0, true => 1 }).sum()
         self.panels.values().filter(|panel| panel.painted).count()
     }
 
@@ -129,62 +125,54 @@ impl Robot {
         self.get_current_panel().color
     }
 
-    fn turn_and_move(&mut self, turn: Turns) {
-        self.dir = match turn {
-            Turns::Left => match self.dir {
-                Directions::Up => Directions::Left,
-                Directions::Left => Directions::Down,
-                Directions::Down => Directions::Right,
-                Directions::Right => Directions::Up,
-            },
-            Turns::Right => match self.dir {
-                Directions::Up => Directions::Right,
-                Directions::Right => Directions::Down,
-                Directions::Down => Directions::Left,
-                Directions::Left => Directions::Up,
-            },
-        };
+    fn turn_and_move(&mut self, turn: Turn) {
+        self.dir = self.dir.turn(turn);
 
         match self.dir {
-            Directions::Up => {
-                self.y += 1;
-                if self.y > self.max_y {
-                    self.max_y = self.y;
-                };
-            }
-            Directions::Down => {
+            Direction::Up => {
                 self.y -= 1;
-                if self.y < self.min_y {
-                    self.min_y = self.y;
-                };
             }
-            Directions::Left => {
+            Direction::Down => {
+                self.y += 1;
+            }
+            Direction::Left => {
                 self.x -= 1;
-                if self.x < self.min_x {
-                    self.min_x = self.x;
-                };
             }
-            Directions::Right => {
+            Direction::Right => {
                 self.x += 1;
-                if self.x > self.max_x {
-                    self.max_x = self.x;
-                };
             }
         }
     }
 
     fn get_current_panel(&mut self) -> &mut Panel {
-        let coordinates = format!("({}, {})", self.x, self.y);
-        if !self.panels.contains_key(&coordinates) {
-            let new_panel = Panel::new();
-            self.panels.insert(coordinates.clone(), new_panel);
-        }
-        self.panels.get_mut(&coordinates).unwrap()
+        self.panels.entry((self.x, self.y)).or_insert(Panel::new())
     }
 
     fn get_color_at(&self, x: isize, y: isize) -> i64 {
-        let coordinates = format!("({}, {})", x, y);
-        self.panels.get(&coordinates).map_or(0, |panel| panel.color)
+        self.panels.get(&(x, y)).map_or(0, |panel| panel.color)
+    }
+
+    fn draw_painting(&self) -> String {
+        // Calculate boundaries
+        let (min_x, min_y, max_x, max_y) = self.panels.keys().fold((0,0,0,0), |(min_x, min_y, max_x, max_y), &(x, y)| {
+            let min_x = cmp::min(min_x, x);
+            let min_y = cmp::min(min_y, y);
+            let max_x = cmp::max(max_x, x);
+            let max_y = cmp::max(max_y, y);
+            (min_x, min_y, max_x, max_y)
+        });
+
+        let mut picture = String::new();
+        for (y, x) in iproduct!((min_y..=max_y), (min_x..=max_x)) {
+            if x == min_x {
+                picture.push('\n');
+            }
+            match self.get_color_at(x, y) {
+                1 => picture.push('#'),
+                _ => picture.push(' '),
+            };
+        }
+        picture
     }
 }
 
