@@ -145,7 +145,7 @@ impl Robot {
     }
 
     fn get_current_panel(&mut self) -> &mut Panel {
-        self.panels.entry((self.x, self.y)).or_insert(Panel::new())
+        self.panels.entry((self.x, self.y)).or_insert_with(Panel::new)
     }
 
     fn get_color_at(&self, x: isize, y: isize) -> i64 {
