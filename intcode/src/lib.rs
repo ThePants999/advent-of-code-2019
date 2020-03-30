@@ -185,12 +185,12 @@ impl Computer {
             if operation.optype == OperationType::End {
                 break;
             }
-            self.execute_operation(operation);
+            self.execute_operation(&operation);
         }
     }
 
     // Execute a single operation that's been fully parsed from memory.
-    fn execute_operation(&mut self, op: Operation) {
+    fn execute_operation(&mut self, op: &Operation) {
         match op.optype {
             OperationType::Add => self.set_at_address(op.params.c, op.params.a + op.params.b),
             OperationType::Multiply => self.set_at_address(op.params.c, op.params.a * op.params.b),
@@ -319,6 +319,7 @@ pub fn load_and_run_computer(path: &str, inputs: &[i64]) -> Result<Vec<i64>, Str
 /// # Panics
 ///
 /// Panics if the supplied program is invalid.
+#[allow(clippy::must_use_candidate)]
 pub fn run_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
     let (in_sender, in_receiver) = mpsc::channel();
     let (out_sender, out_receiver) = mpsc::channel();

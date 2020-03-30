@@ -41,7 +41,7 @@ enum Direction {
 }
 
 impl Direction {
-    fn end(&self, start: &Coordinates, distance: i32) -> Coordinates {
+    fn end(&self, start: Coordinates, distance: i32) -> Coordinates {
         match self {
             Self::Up => Coordinates { x: start.x, y: start.y + distance },
             Self::Down => Coordinates { x: start.x, y: start.y - distance },
@@ -191,7 +191,7 @@ fn build_segment(start: &mut Coordinates, length: &mut i32, command: &str) -> Re
             format!("Invalid distance: {} ({})", chars.as_str(), e),
         )
     })?;
-    let end = direction.end(start, distance);
+    let end = direction.end(*start, distance);
 
     let segment = Segment {
         length_before: *length,

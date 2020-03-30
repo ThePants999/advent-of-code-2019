@@ -37,7 +37,7 @@ fn find_max_amplifier_signal(
     // Run the amplifier sequence for each permutation of the phase settings
     // provided, and find the highest output.
     valid_phase_settings
-        .into_iter()
+        .iter()
         .copied()
         .permutations(5)
         .map(|sequence| sequence_func(program, &sequence))

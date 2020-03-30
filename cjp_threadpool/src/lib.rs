@@ -61,6 +61,7 @@ impl<T: Send + 'static> ThreadPool<T> {
     /// 
     /// let pool = ThreadPool::<()>::new(4);
     /// ```
+    #[must_use]
     pub fn new(num_threads: usize) -> Self {
         let (inbound_work_sender, inbound_work_receiver) = mpsc::channel();
         let (result_sender, results) = mpsc::channel();
@@ -90,6 +91,7 @@ impl<T: Send + 'static> ThreadPool<T> {
     /// 
     /// let pool = ThreadPool::<()>::new_with_default_size();
     /// ```
+    #[must_use]
     pub fn new_with_default_size() -> Self {
         Self::new(num_cpus::get())
     }
@@ -148,6 +150,7 @@ impl Worker {
     fn new<T: Send + 'static>(receiver: Arc<Mutex<Receiver<Job<T>>>>, result_sender: Sender<T>) -> Self {
         Self {
             thread: thread::spawn(move || {
+                #[allow(clippy::while_let_loop)]
                 loop {
                     let job = match receiver.lock().unwrap().recv() {
                         Ok(job) => job,
@@ -156,7 +159,6 @@ impl Worker {
                     let result = job();
                     result_sender.send(result).unwrap();
                 }
-                ()
             })
         }
     }
