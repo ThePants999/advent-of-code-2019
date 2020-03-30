@@ -3,40 +3,40 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
-use std::io;
-use std::io::Read;
-use std::fs::File;
-use std::process;
+use std::io::{self, Read};
 
 use std::collections::VecDeque;
 
-const DECK_SIZE: i128 = 119_315_717_514_047;
+const PART_1_DECK_SIZE: i128 = 10_007;
+const PART_2_DECK_SIZE: i128 = 119_315_717_514_047;
 const NUM_SHUFFLES: i128 = 101_741_582_076_661;
 
-// All hail https://codeforces.com/blog/entry/72593, without which I would never
-// have been able to do this.
+// All hail Spheniscine for https://codeforces.com/blog/entry/72593, without which I would never
+// have been able to do this. Part 1 is implemented through actually applying the shuffling
+// technique, even though modular arithmetic could have solved that too, because it was fun. But
+// the meat of this program is merely an implementation of the algorithm explained in that post.
+// So don't go looking for comments, just read that post :-)
 
 fn main() {
-    //let mut deck: Vec<u32> = (0..DECK_SIZE as u32).collect();
+    let start_time = std::time::Instant::now();
+    let mut part_1_deck: Vec<u32> = (0..PART_1_DECK_SIZE as u32).collect();
     let instructions = load_instructions().unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     let mut f = (1, 0);
     for technique in &instructions {
         f = compose(f, translate(technique));
-        //deck = apply_technique(deck, technique);
+        part_1_deck = apply_technique(part_1_deck, technique);
     }
+
+    let part_1_location = find_card(&part_1_deck, 2019).unwrap();
 
     let big_f = pow_compose(f, NUM_SHUFFLES);
     let x = 2020;
-    let card = mod_divide(x - big_f.1, big_f.0, DECK_SIZE);
-    println!("{}", card);
-}
-
-fn _make_positive(num: i128) -> i128 {
-    if num >= 0 { num } else { num + DECK_SIZE }
+    let card = mod_divide(x - big_f.1, big_f.0, PART_2_DECK_SIZE);
+    println!("Part 1: {}\nPart 2: {}\nTime: {}ms", part_1_location, card, start_time.elapsed().as_millis());
 }
 
 fn translate(technique: &Techniques) -> (i128, i128) {
@@ -48,7 +48,7 @@ fn translate(technique: &Techniques) -> (i128, i128) {
 }
 
 fn compose((a, b): (i128, i128), (c, d): (i128, i128)) -> (i128, i128) {
-    ((a * c) % DECK_SIZE, ((b * c) + d) % DECK_SIZE)
+    ((a * c) % PART_2_DECK_SIZE, ((b * c) + d) % PART_2_DECK_SIZE)
 }
 
 fn pow_compose(mut f: (i128, i128), mut k: i128) -> (i128, i128) {
@@ -81,7 +81,7 @@ enum Techniques {
     DealWithIncrement(i128),
 }
 
-fn _apply_technique(mut deck: Vec<u32>, technique: &Techniques) -> Vec<u32> {
+fn apply_technique(mut deck: Vec<u32>, technique: &Techniques) -> Vec<u32> {
     match technique {
         Techniques::DealIntoNewStack => {
             deck.reverse();
@@ -108,7 +108,6 @@ fn _apply_technique(mut deck: Vec<u32>, technique: &Techniques) -> Vec<u32> {
     }
 }
 
-#[allow(dead_code)]
 fn cut_deck(deck: &[u32], count: usize) -> Vec<u32> {
     let mut new_deck = deck[count..].to_vec();
     new_deck.extend_from_slice(&deck[..count]);
@@ -120,7 +119,7 @@ const CUT: &str = "cut ";
 const DEAL_WITH_INCREMENT: &str = "deal with increment ";
 
 fn load_instructions() -> Result<Vec<Techniques>, io::Error> {
-    let mut input = File::open("day22/input.txt")?;
+    let mut input = std::fs::File::open("day22/input.txt")?;
     let mut instructions = String::new();
     input.read_to_string(&mut instructions)?;
 
@@ -140,7 +139,7 @@ fn load_instructions() -> Result<Vec<Techniques>, io::Error> {
     Ok(techniques)
 }
 
-fn _find_card(deck: &[u32], card: u32) -> Option<usize> {
+fn find_card(deck: &[u32], card: u32) -> Option<usize> {
     for (index, deck_card) in deck.iter().enumerate() {
         if *deck_card == card { return Some(index); }
     }
