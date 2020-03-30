@@ -12,9 +12,9 @@ fn main() {
     let outputs_part_2 = intcode::run_computer(&program, &[5]);
 
     println!(
-        "Part 1: {}\nPart 2: {}\nTime: {}ms",
+        "Part 1: {}\nPart 2: {}\nTime: {}us",
         outputs_part_1[outputs_part_1.len() - 1],
         outputs_part_2[0],
-        start_time.elapsed().as_millis()
+        start_time.elapsed().as_micros()
     );
 }

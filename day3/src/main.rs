@@ -26,10 +26,10 @@ fn main() {
     }
 
     println!(
-        "Shortest Manhattan: {}\nShortest length: {}\nTime: {}ms",
+        "Shortest Manhattan: {}\nShortest length: {}\nTime: {}us",
         manhattan_distances.iter().min().unwrap(),
         wire_lengths.iter().min().unwrap(),
-        start_time.elapsed().as_millis()
+        start_time.elapsed().as_micros()
     );
 }
 

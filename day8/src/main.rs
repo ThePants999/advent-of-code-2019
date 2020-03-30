@@ -22,10 +22,10 @@ fn main() {
     let part_2_picture = image.draw();
 
     println!(
-        "Part 1: {}\nPart 2: {}\nTime: {}ms",
+        "Part 1: {}\nPart 2: {}\nTime: {}us",
         part_1_score,
         part_2_picture,
-        start_time.elapsed().as_millis()
+        start_time.elapsed().as_micros()
     );
 }
 
