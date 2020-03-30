@@ -3,7 +3,6 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
-use std::process;
 use std::sync::mpsc::channel;
 use std::thread;
 
@@ -12,18 +11,13 @@ use intcode;
 fn main() {
     let memory = intcode::load_program("day17/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     let (in_send, in_recv) = channel();
     let (out_send, out_recv) = channel();
     let mut computer = intcode::Computer::new(&memory, in_recv, out_send);
-    thread::spawn(move || {
-        computer.run().unwrap_or_else(|e| {
-            println!("Computer failed: {}", e);
-            process::exit(1);
-        });
-    });
+    thread::spawn(move || { computer.run(); });
 
     let program = String::from("B,B,A,C,A,C,A,C,B,C\nR,4,R,6,R,6,R,4,R,4\nR,6,L,8,R,8\nL,8,R,6,L,10,L,10\nn\n");
     for c in program.chars() {

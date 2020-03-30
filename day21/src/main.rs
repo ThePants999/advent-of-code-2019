@@ -3,27 +3,20 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
-use std::process;
-use std::sync::mpsc::channel;
-use std::thread;
+use std::sync::mpsc;
 
 use intcode;
 
 fn main() {
     let memory = intcode::load_program("day21/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
-    let (in_send, in_recv) = channel();
-    let (out_send, out_recv) = channel();
+    let (in_send, in_recv) = mpsc::channel();
+    let (out_send, out_recv) = mpsc::channel();
     let mut computer = intcode::Computer::new(&memory, in_recv, out_send);
-    thread::spawn(move || {
-        computer.run().unwrap_or_else(|e| {
-            println!("Computer failed: {}", e);
-            process::exit(1);
-        });
-    });
+    std::thread::spawn(move || { computer.run(); });
 
     let program = String::from("NOT A T
     OR T J

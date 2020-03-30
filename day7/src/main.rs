@@ -1,18 +1,25 @@
-use std::process;
 use std::sync::mpsc;
 
 use intcode;
+use itertools::Itertools;
 
 fn main() {
     let start_time = std::time::Instant::now();
 
     let program = intcode::load_program("day7/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
-    let part_1_max_output = find_max_amplifier_signal(&program, &['0', '1', '2', '3', '4'], false);
-    let part_2_max_output = find_max_amplifier_signal(&program, &['5', '6', '7', '8', '9'], true);
+    let part_1_max_output = find_max_amplifier_signal(
+        &program,
+        &[0, 1, 2, 3, 4],
+        &run_amplifier_non_feedback_sequence,
+    );
+    let part_2_max_output = find_max_amplifier_signal(
+        &program,
+        &[5, 6, 7, 8, 9],
+        &run_amplifier_feedback_sequence);
 
     println!(
         "Part 1: {}\nPart 2: {}\nTime: {}ms",
@@ -24,79 +31,44 @@ fn main() {
 
 fn find_max_amplifier_signal(
     program: &[i64],
-    valid_phase_settings: &[char],
-    feedback_loop_mode: bool,
+    valid_phase_settings: &[i64],
+    sequence_func: &dyn Fn(&[i64], &[i64]) -> i64,
 ) -> i64 {
-    let mut max_output = 0;
-
-    for a in valid_phase_settings.to_vec() {
-        let val_1 = a.to_string();
-
-        for b in valid_phase_settings.to_vec() {
-            let mut val_2 = val_1.clone();
-            if val_2.contains(b) {
-                continue;
-            }
-            val_2.push(b);
-
-            for c in valid_phase_settings.to_vec() {
-                let mut val_3 = val_2.clone();
-                if val_3.contains(c) {
-                    continue;
-                }
-                val_3.push(c);
-
-                for d in valid_phase_settings.to_vec() {
-                    let mut val_4 = val_3.clone();
-                    if val_4.contains(d) {
-                        continue;
-                    }
-                    val_4.push(d);
-
-                    for e in valid_phase_settings.to_vec() {
-                        let mut val_5 = val_4.clone();
-                        if val_5.contains(e) {
-                            continue;
-                        }
-                        val_5.push(e);
-
-                        let sequence = val_5
-                            .chars()
-                            .map(|c| i64::from(c.to_digit(10).unwrap()))
-                            .collect::<Vec<i64>>();
-                        let output = if feedback_loop_mode {
-                            run_amplifier_feedback_sequence(program, &sequence)
-                        } else {
-                            run_amplifier_non_feedback_sequence(program, &sequence)
-                        };
-                        if output > max_output {
-                            max_output = output;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    max_output
+    // Run the amplifier sequence for each permutation of the phase settings
+    // provided, and find the highest output.
+    valid_phase_settings
+        .into_iter()
+        .copied()
+        .permutations(5)
+        .map(|sequence| sequence_func(program, &sequence))
+        .max()
+        .unwrap()
 }
 
 fn run_amplifier_non_feedback_sequence(program: &[i64], sequence: &[i64]) -> i64 {
+    // Run the computer once for each phase setting in the sequence provided.
+    // Give each computer, as inputs, the corresponding phase setting, plus the output
+    // from the previous computer. (0 for the first one.)
     let mut input = 0;
     for phase_setting in sequence {
         let inputs = vec![*phase_setting, input];
-        let outputs = intcode::run_computer(program, &inputs).unwrap_or_else(|e| {
-            println!("Computer failed: {}", e);
-            process::exit(1);
-        });
+        let outputs = intcode::run_computer(program, &inputs);
         input = outputs[0];
     }
     input
 }
 
 fn run_amplifier_feedback_sequence(program: &[i64], sequence: &[i64]) -> i64 {
-    // The loop is actually going to give the phase settings to amplifiers in the order BCDEA, so
-    // take A's setting off the front and put it on the end.
+    // Run a computer for each phase setting in the sequence provided, but
+    // leave them all running indefinitely, each on its own thread. Give each one
+    // the previous computer's output channel as its input channel, so they're
+    // passing data to one another, except bootstrap each channel with the phase
+    // setting.  The link from the last computer back to the first goes via
+    // this thread, so we can cache what we see and use the last seen value
+    // when the programs terminate.
+
+    // The loop below is actually going to give the phase settings to amplifiers
+    // in the order BCDEA, so take A's setting off the front and put it on the end.
     let mut sequence = sequence.to_vec();
     let a_setting = sequence.remove(0);
     sequence.push(a_setting);
@@ -107,12 +79,7 @@ fn run_amplifier_feedback_sequence(program: &[i64], sequence: &[i64]) -> i64 {
         let (new_send, new_recv) = mpsc::channel();
         new_send.send(phase_setting).unwrap();
         let mut computer = intcode::Computer::new(program, link_recv, new_send);
-        std::thread::spawn(move || {
-            computer.run().unwrap_or_else(|e| {
-                println!("Computer failed: {}", e);
-                process::exit(1);
-            });
-        });
+        std::thread::spawn(move || { computer.run(); });
         link_recv = new_recv;
     }
 

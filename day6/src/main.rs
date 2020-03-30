@@ -5,6 +5,19 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
+// This day is a great example of my approach to these challenges and how it differs from
+// some others'. Where possible, I like to build extensible representations of the input data
+// that (a) make it really easy to understand how the problem is being solved and (b) could 
+// potentially be used to answer questions beyond the two we happen to have been given.
+//
+// Compare mine to AxlLind (https://github.com/AxlLind/AdventOfCode2019/blob/master/src/bin/06.rs).
+// He's built a HashMap of parents to children.  You can use that in cunning ways to traverse
+// the structure, and indeed he does, but (a) it's a lot harder to wrap your head around how
+// and why his works, and (b) his executes about 50% slower than mine because he hasn't built an
+// actual hierarchical relationship and so has to iterate through his HashMap for each level of
+// traversal. The price I've paid for these gains is that there's _way_ more code here, and I
+// imagine it took me a lot longer!
+
 fn main() {
     let start_time = std::time::Instant::now();
 

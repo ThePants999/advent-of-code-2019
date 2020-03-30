@@ -17,8 +17,8 @@ fn main() {
     memory[2] = 2;
     let (tx, rx) = std::sync::mpsc::channel();
     let mut computer = intcode::Computer::new(&memory, rx, tx);
-    computer.run().unwrap();
-    println!("Part 1: {}", computer.fetch_from_address(0).unwrap());
+    computer.run();
+    println!("Part 1: {}", computer.fetch_from_address(0));
 
     // Part 2: try every possible combination of values, looking for a combination that
     // results in memory address 0 containing TARGET after execution completes.  Just for
@@ -32,8 +32,8 @@ fn main() {
         pool.schedule(Box::new(move || {
             let (tx, rx) = std::sync::mpsc::channel();
             let mut computer = intcode::Computer::new(&memory_copy, rx, tx);
-            computer.run().unwrap();
-            if computer.fetch_from_address(0).unwrap() == TARGET {
+            computer.run();
+            if computer.fetch_from_address(0) == TARGET {
                 Some((noun * 100) + verb)
             } else {
                 None

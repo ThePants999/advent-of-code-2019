@@ -4,7 +4,6 @@
 #![allow(clippy::cast_possible_wrap)]
 
 use std::collections::HashMap;
-use std::process;
 use std::sync::mpsc;
 
 use intcode;
@@ -16,14 +15,11 @@ fn main() {
 
     let mut program = intcode::load_program("day13/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     // Part 1
-    let outputs_part_1 = intcode::run_computer(&program, &[]).unwrap_or_else(|e| {
-        println!("Computer failed: {}", e);
-        process::exit(1);
-    });
+    let outputs_part_1 = intcode::run_computer(&program, &[]);
     let blocks = outputs_part_1
         .iter()
         .skip(2)
@@ -36,12 +32,7 @@ fn main() {
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
     let mut computer = intcode::Computer::new(&program, in_recv, out_send);
-    std::thread::spawn(move || {
-        computer.run().unwrap_or_else(|e| {
-            println!("Computer failed: {}", e);
-            process::exit(1);
-        });
-    });
+    std::thread::spawn(move || { computer.run(); });
 
     let mut screen = Screen {
         width: 1,

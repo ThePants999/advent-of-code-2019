@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::process;
 use std::sync::mpsc;
 
 use intcode;
@@ -11,7 +10,7 @@ fn main() {
 
     let program = intcode::load_program("day11/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     let part_1_robot = run_paint_sequence(&program, false);
@@ -42,12 +41,7 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
     let mut computer = intcode::Computer::new(program, in_recv, out_send);
-    std::thread::spawn(move || {
-        computer.run().unwrap_or_else(|e| {
-            println!("Computer failed: {}", e);
-            process::exit(1);
-        });
-    });
+    std::thread::spawn(move || { computer.run(); });
 
     let mut robot = Robot::new();
     if paint_current_panel {
@@ -63,7 +57,7 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
                 0 | 1 => robot.paint(val),
                 _ => {
                     println!("Invalid paint instruction received: {}", val);
-                    process::exit(1);
+                    std::process::exit(1);
                 }
             },
             Err(_) => break,
@@ -74,7 +68,7 @@ fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
                 1 => robot.turn_and_move(Turns::Right),
                 _ => {
                     println!("Invalid turn instruction received: {}", val);
-                    process::exit(1);
+                    std::process::exit(1);
                 }
             },
             Err(_) => break,

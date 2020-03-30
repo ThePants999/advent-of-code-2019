@@ -1,5 +1,4 @@
-use std::process;
-use std::sync::mpsc::channel;
+use std::sync::mpsc;
 
 use intcode;
 //#[macro_use] extern crate itertools;
@@ -7,7 +6,7 @@ use intcode;
 fn main() {
     let memory = intcode::load_program("day19/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     //let mut grid: [[bool; 50]; 50] = [[false; 50]; 50];
@@ -17,8 +16,8 @@ fn main() {
     let mut guess_last_x = 18;
     let mut guessing_first = true;
     loop {        
-        let (in_send, in_recv) = channel();
-        let (out_send, out_recv) = channel();
+        let (in_send, in_recv) = mpsc::channel();
+        let (out_send, out_recv) = mpsc::channel();
 
         if guessing_first {
             in_send.send(guess_first_x).unwrap();
@@ -28,10 +27,7 @@ fn main() {
         in_send.send(y).unwrap();
 
         let mut computer = intcode::Computer::new(&memory, in_recv, out_send);
-        computer.run().unwrap_or_else(|e| {
-            println!("Computer failed: {}", e);
-            process::exit(1);
-        });
+        computer.run();
     
         let output = out_recv.recv().unwrap();
         if guessing_first {

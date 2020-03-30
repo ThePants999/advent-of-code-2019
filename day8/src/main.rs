@@ -5,107 +5,118 @@
 
 use std::io::{self, Read};
 
+const WIDTH: usize = 25;
+const HEIGHT: usize = 6;
+const PIXELS_PER_LAYER: usize = WIDTH * HEIGHT;
+
 fn main() {
     let start_time = std::time::Instant::now();
 
-    let width = 25;
-    let height = 6;
-
-    let image = load_image(width, height).unwrap_or_else(|err| {
+    let image = load_image().unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
         std::process::exit(1);
     });
 
-    let mut layers_data: Vec<[i32; 3]> = Vec::new();
-    for layer in &image.layers {
-        let mut counts: [i32; 3] = [0; 3];
-        for pixel in layer {
-            match pixel {
-                0 | 1 | 2 => counts[*pixel as usize] += 1,
-                _ => (),
-            }
-        }
-        layers_data.push(counts);
-    }
-
-    let mut lowest_zeroes = layers_data[0][0];
-    let mut score = layers_data[0][1] * layers_data[0][2];
-    for layer_data in layers_data {
-        if layer_data[0] < lowest_zeroes {
-            lowest_zeroes = layer_data[0];
-            score = layer_data[1] * layer_data[2];
-        }
-    }
-
-    let mut picture = String::new();
-    for i in 0..(width * height) {
-        if i % width == 0 {
-            picture.push('\n');
-        }
-        for layer in &image.layers {
-            match layer[i] {
-                0 => {
-                    picture.push(' ');
-                    break;
-                }
-                1 => {
-                    picture.push('*');
-                    break;
-                }
-                _ => (),
-            }
-        }
-    }
+    let max_zeroes = image.layers.iter().map(Layer::num_zeroes).min().unwrap();
+    let part_1_score = image.layers.iter().find(|layer| layer.num_zeroes() == max_zeroes).unwrap().part_1_score();
+    let part_2_picture = image.draw();
 
     println!(
         "Part 1: {}\nPart 2: {}\nTime: {}ms",
-        score,
-        picture,
+        part_1_score,
+        part_2_picture,
         start_time.elapsed().as_millis()
     );
 }
 
+struct Layer {
+    pixels: Vec<usize>,
+    pixel_counts: [usize; 3],
+}
+
+impl Layer {
+    fn new() -> Self {
+        Self {
+            pixels: Vec::with_capacity(PIXELS_PER_LAYER),
+            pixel_counts: [0; 3],
+        }
+    }
+
+    fn add_pixel(&mut self, pixel: usize) {
+        self.pixels.push(pixel);
+        self.pixel_counts[pixel] += 1;
+    }
+
+    fn is_full(&self) -> bool {
+        self.pixels.len() == PIXELS_PER_LAYER
+    }
+
+    fn num_zeroes(&self) -> usize {
+        self.pixel_counts[0]
+    }
+
+    fn part_1_score(&self) -> usize {
+        self.pixel_counts[1] * self.pixel_counts[2]
+    }
+}
+
 struct Image {
-    width: usize,
-    height: usize,
-    layers: Vec<Vec<i32>>,
+    layers: Vec<Layer>,
 }
 
 impl Image {
-    fn new(width: usize, height: usize) -> Self {
-        let mut layers = Vec::new();
-        layers.push(Vec::with_capacity(width * height));
-        Self {
-            width,
-            height,
-            layers,
-        }
+    fn from_str(data: &str) -> Self {
+        let mut image = Self { layers: Vec::new() };
+        image.new_layer();
+
+        data.chars()
+            .map(|c| c.to_digit(10).unwrap())
+            .for_each(|digit| {
+                image.add_pixel(digit as usize);
+            });
+
+        image
     }
 
     fn new_layer(&mut self) {
-        self.layers
-            .push(Vec::with_capacity(self.width * self.height));
+        self.layers.push(Layer::new());
     }
 
-    fn add_pixel(&mut self, pixel: i32) {
-        if self.layers.last().unwrap().len() == (self.width * self.height) {
-            self.new_layer();
+    fn add_pixel(&mut self, pixel: usize) {
+        if self.layers.last().unwrap().is_full() { self.new_layer(); }
+        self.layers.last_mut().unwrap().add_pixel(pixel);
+    }
+
+    fn draw(&self) -> String {
+        let mut picture = String::new();
+
+        for i in 0..PIXELS_PER_LAYER {
+            if i % WIDTH == 0 {
+                picture.push('\n');
+            }
+            for layer in &self.layers {
+                match layer.pixels[i] {
+                    0 => {
+                        picture.push(' ');
+                        break;
+                    }
+                    1 => {
+                        picture.push('#');
+                        break;
+                    }
+                    _ => (),
+                }
+            }
         }
-        self.layers.last_mut().unwrap().push(pixel);
+
+        picture
     }
 }
 
-fn load_image(width: usize, height: usize) -> Result<Image, io::Error> {
+fn load_image() -> Result<Image, io::Error> {
     let mut input = std::fs::File::open("day8/input.txt")?;
     let mut data = String::new();
     input.read_to_string(&mut data)?;
 
-    let mut image = Image::new(width, height);
-    data.chars()
-        .map(|c| c.to_digit(10).unwrap())
-        .for_each(|digit| {
-            image.add_pixel(digit as i32);
-        });
-
-    Ok(image)
+    Ok(Image::from_str(&data))
 }

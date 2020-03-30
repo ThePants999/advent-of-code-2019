@@ -20,12 +20,7 @@ fn main() {
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
     let mut computer = intcode::Computer::new(&program, in_recv, out_send);
-    std::thread::spawn(move || {
-        computer.run().unwrap_or_else(|e| {
-            println!("Computer failed: {}", e);
-            std::process::exit(1);
-        });
-    });
+    std::thread::spawn(move || { computer.run(); });
 
     let mut droid = Droid::new(in_send, out_recv);
     let ship = droid.explore_ship();

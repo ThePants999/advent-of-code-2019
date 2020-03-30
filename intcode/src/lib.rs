@@ -1,18 +1,18 @@
 //! # Intcode
-//! 
+//!
 //! `intcode` is a library for executing Intcode programs, as featured in the Advent
 //! of Code 2019. To use this library, create a [`Computer`], which takes a program plus
-//! two channels, one for sending inputs in and one for receiving outputs.  Helper 
+//! two channels, one for sending inputs in and one for receiving outputs.  Helper
 //! functions assist with loading programs from file, and executing them simplistically.
-//! 
+//!
 //! Typical usage might look like this:
-//! 
+//!
 //! ```
 //! let program = intcode::load_program("path/to/input.txt").unwrap_or_else(|err| {
 //!     println!("Could not load input file!\n{:?}", err);
 //!     process::exit(1);
 //! });
-//! 
+//!
 //! let (in_send, in_recv) = std::sync::mpsc::channel();
 //! let (out_send, out_recv) = std::sync::mpsc::channel();
 //! let mut computer = intcode::Computer::new(&program, in_recv, out_send);
@@ -23,16 +23,15 @@
 //!     });
 //! });
 //! ```
-//! 
+//!
 //! The computer is now executing in parallel, and you can communicate with it
 //! via `in_send` and `out_recv`.
-//! 
+//!
 //! [`Computer`]: ./struct.Computer.html
-//! 
+//!
 
 #![crate_name = "intcode"]
 #![crate_type = "lib"]
-
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::cast_possible_truncation)]
@@ -43,10 +42,9 @@ use std::io;
 use std::io::Read;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-const MEMORY_CAPACITY: usize = 65536;
-
+// Operations that the Intcode computer can perform.
 #[derive(PartialEq, Eq)]
-enum OperationTypes {
+enum OperationType {
     Add,
     Multiply,
     Input,
@@ -59,66 +57,87 @@ enum OperationTypes {
     End,
 }
 
-struct Instruction {
-    optype: OperationTypes,
-    param_modes: Vec<ParameterModes>,
-}
-
-impl Instruction {
-    fn decode(mut instruction: i64) -> Result<Self, String> {
-        // An instruction comprises multiple pieces of information.
-        // 
-        // The ones and tens digits of the decimal representation contain the opcode,
-        // specifying the type of operation to perform.  Each operation type then
-        // requires a fixed number of parameters, and while the parameters themselves
-        // are in subsequent memory addresses, the modes in which they operate are
-        // encoded as the higher digits of the original instruction - i.e. the hundreds
-        // digit specifies the mode of the first parameter, the thousands digit the
-        // second, etc.
-        let (optype, num_parameters) = match instruction % 100 {
-            1 => (OperationTypes::Add, 3),
-            2 => (OperationTypes::Multiply, 3),
-            3 => (OperationTypes::Input, 1),
-            4 => (OperationTypes::Output, 1),
-            5 => (OperationTypes::JumpIfTrue, 2),
-            6 => (OperationTypes::JumpIfFalse, 2),
-            7 => (OperationTypes::LessThan, 3),
-            8 => (OperationTypes::Equals, 3),
-            9 => (OperationTypes::RelativeBaseOffset, 1),
-            99 => (OperationTypes::End, 0),
-            opcode => return Err(format!("Invalid opcode in program: {}", opcode)),
-        };
-        instruction /= 100;
-
-        let mut param_modes = Vec::with_capacity(num_parameters);
-        for _ in 0..num_parameters {
-            param_modes.push(match instruction % 10 {
-                0 => ParameterModes::Position,
-                1 => ParameterModes::Immediate,
-                2 => ParameterModes::Relative,
-                _ => return Err(format!("Invalid parameter type: {}", instruction)),
-            });
-            instruction /= 10;
+impl OperationType {
+    // Decode an opcode into an enum value.
+    fn from_opcode(opcode: i64) -> Self {
+        match opcode {
+            1 => OperationType::Add,
+            2 => OperationType::Multiply,
+            3 => OperationType::Input,
+            4 => OperationType::Output,
+            5 => OperationType::JumpIfTrue,
+            6 => OperationType::JumpIfFalse,
+            7 => OperationType::LessThan,
+            8 => OperationType::Equals,
+            9 => OperationType::RelativeBaseOffset,
+            99 => OperationType::End,
+            bad_code => unreachable!("Invalid opcode detected: {}", bad_code),
         }
+    }
 
-        Ok(Instruction{ optype, param_modes })
+    // Determine the complete size of an instruction of this type - i.e. the distance the
+    // instruction pointer needs to move to get to the next instruction.
+    fn instruction_size(&self) -> i64 {
+        match self {
+            OperationType::Add
+            | OperationType::Multiply
+            | OperationType::LessThan
+            | OperationType::Equals => 4,
+            OperationType::Input | OperationType::Output | OperationType::RelativeBaseOffset => 2,
+            OperationType::JumpIfTrue | OperationType::JumpIfFalse => 3,
+            OperationType::End => 0,
+        }
     }
 }
 
-struct Operation {
-    instruction: Instruction,
-    params: Vec<Parameter>,
-}
-
-enum ParameterModes {
+// Each parameter in an operation can work in one of three modes.
+//
+// -  An "immediate" parameter means that the value of the parameter
+//    is the number that should be used in the operation.
+// -  A "position" parameter means that the value of the parameter is
+//    a memory address, and the content of that address is the number
+//    that should be used in the operation.
+// -  A "relative" parameter means that the value of the parameter is
+//    a delta to the current relative base, and combining the two gives
+//    a memory address whose content is the number that should be used
+//    in the operation.
+enum ParameterMode {
     Position,
     Immediate,
     Relative,
 }
 
-struct Parameter {
-    unresolved_value: i64,
-    resolved_value: i64,
+impl ParameterMode {
+    // The instruction (i.e. the value at the instruction pointer) contains more than
+    // just the opcode.  It also specifies which mode the following parameters should
+    // work in. Each parameter's mode is encoded in a different base 10 digit of the
+    // instruction - the lowest two digits are the opcode, and the next three are the
+    // parameter modes for the three parameters.
+    fn from_instruction(instruction: i64, parameter_num: i64) -> Self {
+        let divisor = match parameter_num {
+            1 => 100,
+            2 => 1_000,
+            3 => 10_000,
+            _ => unreachable!(),
+        };
+        match (instruction / divisor) % 10 {
+            0 => ParameterMode::Position,
+            1 => ParameterMode::Immediate,
+            2 => ParameterMode::Relative,
+            _ => unreachable!("Bad instruction found in program: {}", instruction),
+        }
+    }
+}
+
+struct Parameters {
+    a: i64,
+    b: i64,
+    c: i64,
+}
+
+struct Operation {
+    optype: OperationType,
+    params: Parameters,
 }
 
 /// A virtual computer whose memory contains an Intcode program and which can execute
@@ -127,235 +146,200 @@ pub struct Computer {
     memory: Vec<i64>,
     in_channel: Receiver<i64>,
     out_channel: Sender<i64>,
-    instruction_pointer: usize,
-    relative_base: usize,
+    instruction_pointer: i64,
+    relative_base: i64,
 }
 
 impl Computer {
     /// Construct a computer to run `program`.  `program` only needs to be as long as the
     /// instructions and data contained within it; the computer has additional memory available
     /// that the program can refer to.
-    /// 
+    ///
     /// `in_channel` is the receive half of a channel on which you can send runtime inputs to
     /// the program, and `out_channel` is the send half of a channel on which you can receive
     /// runtime outputs.
     pub fn new(program: &[i64], in_channel: Receiver<i64>, out_channel: Sender<i64>) -> Self {
-        let mut comp = Self {
-            memory: program.to_vec(),
+        Self {
+            memory: program.into(),
             in_channel,
             out_channel,
             instruction_pointer: 0,
             relative_base: 0,
-        };
-
-        comp.memory.extend(std::iter::repeat(0).take(MEMORY_CAPACITY - program.len()));
-
-        comp
+        }
     }
 
     /// Executes the program in the computer's memory.
-    /// 
+    ///
     /// This will synchronously run the program through to completion on the current thread, but
     /// may block waiting for input on the computer's input channel if sufficient inputs are not
     /// pre-sent.
-    /// 
-    /// # Errors
-    /// 
-    /// Returns an error if any problem is hit executing the program, which would indicate either
-    /// that the program is invalid, or that invalid inputs were provided to it, or that the
-    /// channels were closed prematurely.
-    pub fn run(&mut self) -> Result<(), String> {
+    ///
+    /// # Panics
+    ///
+    /// Panics if any problem is hit executing the program, which would indicate either that the
+    /// program is invalid, or that invalid inputs were provided to it, or that the channels were
+    /// closed prematurely.
+    pub fn run(&mut self) {
         loop {
-            // An instruction consists of an operation code and a set of parameters.
-            // The number of parameters is determined by the operation code, and
-            // follow the operation code at consecutive memory locations.
-            let instruction_val = self.fetch_from_address(self.instruction_pointer)?;
-            let instruction = Instruction::decode(instruction_val)?;
-            self.instruction_pointer += 1;
-
-            if instruction.optype == OperationTypes::End {
-                break Ok(())
+            let operation = self.fetch_operation();
+            if operation.optype == OperationType::End {
+                break;
             }
-
-            let operation = Operation {
-                params: self.extract_parameters(&instruction.param_modes)?,
-                instruction,
-            };
-
-            self.apply_operation(&operation)?;
+            self.execute_operation(operation);
         }
     }
 
-    fn extract_parameters(&mut self, param_modes: &[ParameterModes]) -> Result<Vec<Parameter>, String> {
-        // Each parameter can work in one of three modes.
-        //
-        // -  An "immediate" parameter means that the value of the parameter
-        //    is the number that should be used in the operation.
-        // -  A "position" parameter means that the value of the parameter is
-        //    a memory address, and the content of that address is the number
-        //    that should be used in the operation.
-        // -  A "relative" parameter means that the value of the parameter is
-        //    a delta to the current relative base, and combining the two gives
-        //    a memory address whose content is the number that should be used
-        //    in the operation.
-        //
-        // The "unresolved" value is the value before a memory lookup, and the
-        // resolved value is the value to use in the operation.
-        //
-        // Note that some operations treat a parameter as a memory address.  In
-        // those cases, the unresolved value is always used - we don't support
-        // multiple levels of indirection.
-        let mut parameters = Vec::new();
-        for param_mode in param_modes {
-            let mut unresolved_value = self.fetch_from_address(self.instruction_pointer)?;
-            let resolved_value = match param_mode {
-                ParameterModes::Position => self.fetch_from_address(unresolved_value as usize)?,
-                ParameterModes::Immediate => unresolved_value,
-                ParameterModes::Relative => {
-                    unresolved_value += self.relative_base as i64;
-                    self.fetch_from_address(unresolved_value as usize)?
-                },
-            };
-            parameters.push(Parameter { unresolved_value,  resolved_value });
-            self.instruction_pointer += 1;
+    // Execute a single operation that's been fully parsed from memory.
+    fn execute_operation(&mut self, op: Operation) {
+        match op.optype {
+            OperationType::Add => self.set_at_address(op.params.c, op.params.a + op.params.b),
+            OperationType::Multiply => self.set_at_address(op.params.c, op.params.a * op.params.b),
+            OperationType::Input => self.set_at_address(
+                op.params.a,
+                self.in_channel
+                    .recv()
+                    .expect("Intcode computer expected an input but channel was closed!"),
+            ),
+            OperationType::Output => self
+                .out_channel
+                .send(op.params.a)
+                .expect("Intcode computer tried to send an output but channel was closed!"),
+            OperationType::JumpIfTrue => {
+                if op.params.a != 0 {
+                    self.instruction_pointer = op.params.b;
+                }
+            }
+            OperationType::JumpIfFalse => {
+                if op.params.a == 0 {
+                    self.instruction_pointer = op.params.b;
+                }
+            }
+            OperationType::LessThan => self.set_at_address(op.params.c, op.params.a < op.params.b),
+            OperationType::Equals => self.set_at_address(op.params.c, op.params.a == op.params.b),
+            OperationType::RelativeBaseOffset => self.relative_base += op.params.a,
+            OperationType::End => unreachable!(),
         }
-        Ok(parameters)
     }
 
-    fn apply_operation(&mut self, op: &Operation) -> Result<(), String> {
-        match op.instruction.optype {
-            OperationTypes::Add => {
-                // Add parameters 0 and 1, and store the result at the address specified
-                // by parameter 2.
-                let result = op.params[0].resolved_value + op.params[1].resolved_value;
-                self.check_address(op.params[2].unresolved_value as usize)?;
-                self.memory[op.params[2].unresolved_value as usize] = result;
-            },
-            OperationTypes::Multiply => {
-                // Multiply parameters 0 and 1, and store the result at the address specified
-                // by parameter 2.
-                let result = op.params[0].resolved_value * op.params[1].resolved_value;
-                self.check_address(op.params[2].unresolved_value as usize)?;
-                self.memory[op.params[2].unresolved_value as usize] = result;
-            },
-            OperationTypes::Input => match self.in_channel.recv() {
-                // Pull a value from the input stream and store it at the address specified
-                // by parameter 0. (Parameter 0 is always treated as immediate.)
-                Ok(input) => {
-                    self.check_address(op.params[0].unresolved_value as usize)?;
-                    self.memory[op.params[0].unresolved_value as usize] = input;
-                }
-                Err(e) => {
-                    return Err(format!("Ran out of inputs!\n{}", e));
-                }
-            },
-            OperationTypes::Output => {
-                // Push parameter 0 to the output stream.
-                self.out_channel
-                    .send(op.params[0].resolved_value)
-                    .map_err(|e| format!("{:?}", e))?;
-            },
-            OperationTypes::JumpIfTrue => {
-                // If parameter 0 is non-zero, jump the instruction pointer to parameter 1.
-                if op.params[0].resolved_value != 0 {
-                    self.check_address(op.params[1].resolved_value as usize)?;
-                    self.instruction_pointer = op.params[1].resolved_value as usize;
-                }
-            },
-            OperationTypes::JumpIfFalse => {
-                // If parameter 0 is zero, jump the instruction pointer to parameter 1.
-                if op.params[0].resolved_value == 0 {
-                    self.check_address(op.params[1].resolved_value as usize)?;
-                    self.instruction_pointer = op.params[1].resolved_value as usize;
-                }
-            },
-            OperationTypes::LessThan => {
-                // Determine whether parameter 0 is less than parameter 1, and store 1 or 0
-                // accordingly at the address specified by parameter 2. (Parameter 2 is always
-                // treated as immediate.)
-                let result = if op.params[0].resolved_value < op.params[1].resolved_value { 1 } else { 0 };
-                self.check_address(op.params[2].unresolved_value as usize)?;
-                self.memory[op.params[2].unresolved_value as usize] = result;
-            },
-            OperationTypes::Equals => {
-                // Determine whether parameter 0 is equal to parameter 1, and store 1 or 0
-                // accordingly at the address specified by parameter 2. (Parameter 2 is always
-                // treated as immediate.)
-                let result = if op.params[0].resolved_value == op.params[1].resolved_value { 1 } else { 0 };
-                self.check_address(op.params[2].unresolved_value as usize)?;
-                self.memory[op.params[2].unresolved_value as usize] = result;
-            },
-            OperationTypes::RelativeBaseOffset => {
-                // Increment the relative base by the value of parameter 0.
-                self.relative_base = (self.relative_base as i64 + op.params[0].resolved_value) as usize;
-            },
-            OperationTypes::End => (),
-        }
-
-        Ok(())
+    // Determine the mode in which to evaluate a given parameter.
+    fn get_parameter_mode(&self, parameter_num: i64) -> ParameterMode {
+        ParameterMode::from_instruction(
+            self.fetch_from_address(self.instruction_pointer),
+            parameter_num,
+        )
     }
 
-    // Makes sure the specified address is valid.  (For now, "valid" just means within the
-    // bounds of the computer's memory.)
-    fn check_address(&self, address: usize) -> Result<(), String> {
-        if address >= self.memory.len() {
-            return Err(format!(
-                "Computer has insufficient memory! Requested address: {}",
-                address
-            ));
+    // Load a parameter that we're going to use as a piece of data.  This implies
+    // the "standard" treatment for all parameter types, meaning that for non-"Immediate"
+    // parameters, we treat the value as an address, and then go and pick up the data
+    // from that address.
+    fn fetch_read_parameter(&self, parameter_num: i64) -> i64 {
+        let value = self.fetch_from_address(self.instruction_pointer + parameter_num);
+        match self.get_parameter_mode(parameter_num) {
+            ParameterMode::Position => self.fetch_from_address(value),
+            ParameterMode::Immediate => value,
+            ParameterMode::Relative => self.fetch_from_address(value + self.relative_base),
         }
-        Ok(())
+    }
+
+    // Load a parameter that we're going to use as a location to write data to.  Our
+    // handling of these parameters is slightly different, because we want to return the
+    // address, not the data at that address, so there's one fewer level of indirection
+    // (which results in "Position" and "Immediate" being treated identically).
+    fn fetch_write_parameter(&self, parameter_num: i64) -> i64 {
+        let value = self.fetch_from_address(self.instruction_pointer + parameter_num);
+        match self.get_parameter_mode(parameter_num) {
+            ParameterMode::Position | ParameterMode::Immediate => value,
+            ParameterMode::Relative => value + self.relative_base,
+        }
+    }
+
+    // Load the next operation to perform - that is, the operation type and parameters - from memory.
+    fn fetch_operation(&mut self) -> Operation {
+        let optype =
+            OperationType::from_opcode(self.fetch_from_address(self.instruction_pointer) % 100);
+
+        // For most operations, the first two parameters are data, and the third - if they have a
+        // third - is a location to put the result.  We handle those a bit differently.  However,
+        // Input is a special case.  It only has one parameter, and it's a location for the result.
+        let (a, b, c) = if optype == OperationType::Input {
+            (self.fetch_write_parameter(1), 0, 0)
+        } else {
+            // For simplicity, we'll fetch the maximum three parameters following the instruction.
+            // Some operation types don't have three parameters, in which case we'll have parsed 
+            // the following instruction as a parameter to this one, but `execute_operation` will 
+            // ignore "parameters" it doesn't need so that's not an issue.
+            (
+                self.fetch_read_parameter(1),
+                self.fetch_read_parameter(2),
+                self.fetch_write_parameter(3),
+            )
+        };
+        self.instruction_pointer += optype.instruction_size();
+        Operation {
+            optype,
+            params: Parameters { a, b, c },
+        }
     }
 
     /// Safely retrieves the data at a given memory address.
-    /// 
-    /// # Errors
-    /// 
-    /// Returns an error if the specified address is outside of the computer's memory.
-    pub fn fetch_from_address(&self, address: usize) -> Result<i64, String> {
-        self.check_address(address).map(|_| self.memory[address])
+    pub fn fetch_from_address(&self, address: i64) -> i64 {
+        *self.memory.get(address as usize).unwrap_or(&0)
+    }
+
+    // Stores a value at a memory location, enlarging the memory if needed.
+    fn set_at_address<T: Into<i64>>(&mut self, address: i64, value: T) {
+        let address = address as usize;
+        if address >= self.memory.len() {
+            self.memory.resize(address + 1, 0);
+        }
+        self.memory[address] = value.into();
     }
 }
 
 /// Helper function for running an Intcode program (from file) that can run all the way to
 /// completion with a predetermined set of inputs (including no inputs).
-/// 
+///
 /// # Errors
-/// 
+///
 /// Returns an error if the file cannot be opened or read, or if it is syntactically
-/// invalid, or if the computer hits a problem running the program it contained.
+/// invalid.
+///
+/// # Panics
+///
+/// Panics if the program is syntactically valid but semantically invalid.
 pub fn load_and_run_computer(path: &str, inputs: &[i64]) -> Result<Vec<i64>, String> {
     let program = load_program(path).map_err(|e| format!("{:?}", e))?;
-    run_computer(&program, inputs)
+    Ok(run_computer(&program, inputs))
 }
 
 /// Helper function for running an Intcode program that can run all the way to
 /// completion with a predetermined set of inputs (including no inputs).
-/// 
-/// # Errors
-/// 
-/// Returns an error if the computer hits a problem running the supplied program.
-pub fn run_computer(program: &[i64], inputs: &[i64]) -> Result<Vec<i64>, String> {
+///
+/// # Panics
+///
+/// Panics if the supplied program is invalid.
+pub fn run_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
     let (in_sender, in_receiver) = mpsc::channel();
     let (out_sender, out_receiver) = mpsc::channel();
 
     for input in inputs {
-        in_sender.send(*input).map_err(|e| format!("{:?}", e))?;
+        in_sender.send(*input).unwrap();
     }
 
-    Computer::new(&program, in_receiver, out_sender).run()?;
+    Computer::new(&program, in_receiver, out_sender).run();
 
     let mut outputs = Vec::new();
     while let Ok(output) = out_receiver.try_recv() {
         outputs.push(output);
     }
-    Ok(outputs)
+    outputs
 }
 
 /// Loads an Intcode program from the file at `path`.
-/// 
+///
 /// # Errors
-/// 
+///
 /// Returns an error if the file cannot be opened or read, or if it is syntactically
 /// invalid, but doesn't detect if the program itself is invalid.
 pub fn load_program(path: &str) -> Result<Vec<i64>, io::Error> {

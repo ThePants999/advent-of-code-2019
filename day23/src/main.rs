@@ -1,7 +1,4 @@
-use std::process;
-use std::sync::mpsc::{Sender, Receiver, channel};
-use std::thread;
-
+use std::sync::mpsc::{self, Sender, Receiver};
 use std::collections::HashMap;
 
 use intcode;
@@ -9,7 +6,7 @@ use intcode;
 fn main() {
     let memory = intcode::load_program("day23/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
-        process::exit(1);
+        std::process::exit(1);
     });
 
     let mut map: HashMap<i64, Computer> = HashMap::new();
@@ -75,15 +72,10 @@ struct Computer {
 impl Computer {
     fn new(memory: &[i64], address: i64) -> Self {
         //let (network_send, network_recv) = channel();
-        let (in_send, in_recv) = channel();
-        let (out_send, out_recv) = channel();
+        let (in_send, in_recv) = mpsc::channel();
+        let (out_send, out_recv) = mpsc::channel();
         let mut computer = intcode::Computer::new(memory, in_recv, out_send);
-        thread::spawn(move || {
-            computer.run().unwrap_or_else(|e| {
-                println!("Computer failed: {}", e);
-                process::exit(1);
-            });
-        });
+        std::thread::spawn(move || { computer.run(); });
 
         in_send.send(address).unwrap();
 
