@@ -181,16 +181,6 @@ impl Position {
     fn origin() -> Self {
         Self { row: 0, col: 0 }
     }
-
-    fn extend_min(&mut self, other: &Self) {
-        self.row = min(self.row, other.row);
-        self.col = min(self.col, other.col);
-    }
-
-    fn extend_max(&mut self, other: &Self) {
-        self.row = max(self.row, other.row);
-        self.col = max(self.col, other.col);
-    }
 }
 
 impl std::ops::Add for Position {
@@ -266,14 +256,9 @@ struct LearnedShipInfo {
     // The location of the oxygen system.
     oxygen_system: Position,
 
-    // The relative co-ordinates of the most top-left position we know about.
-    min_pos: Position,
-
-    // The relative co-ordinates of the most bottom-right position we know about.
-    max_pos: Position,
-
     // Whether, in exploring this ship, we've moved away from the starting point.
-    // We store this because we're finished when we return to the starting point.
+    // We store this because we're finished when we return to the starting point,
+    // but don't necessarily move off it immediately.
     moved_off_starting_pos: bool,
 }
 
@@ -282,8 +267,6 @@ impl LearnedShipInfo {
         let mut info = Self {
             map: HashMap::new(),
             oxygen_system: Position::origin(),
-            min_pos: Position::origin(),
-            max_pos: Position::origin(),
             moved_off_starting_pos: false,
         };
         info.map.insert(Position::origin(), '.');
@@ -305,9 +288,19 @@ struct Ship {
 
 impl Ship {
     fn construct(info: LearnedShipInfo) -> Self {
-        let width = (info.max_pos.col - info.min_pos.col + 1) as usize;
-        let height = (info.max_pos.row - info.min_pos.row + 1) as usize;
-        let delta = Position::origin() - info.min_pos;
+        // Calculate boundaries
+        let (min_row, min_col, max_row, max_col) = info.map.keys().fold((0,0,0,0), |(min_row, min_col, max_row, max_col), pos| {
+            let min_row = min(min_row, pos.row);
+            let min_col = min(min_col, pos.col);
+            let max_row = max(max_row, pos.row);
+            let max_col = max(max_col, pos.col);
+            (min_row, min_col, max_row, max_col)
+        });
+
+
+        let width = (max_col - min_col + 1) as usize;
+        let height = (max_row - min_row + 1) as usize;
+        let delta = Position::origin() - Position { row: min_row, col: min_col };
 
         let mut grid: Vec<Vec<char>> =
             std::iter::repeat(std::iter::repeat(' ').take(height).collect())
@@ -379,9 +372,6 @@ impl Droid {
                 ('.', dir.turn_right(), true)
             }
         };
-
-        info.min_pos.extend_min(&target_pos);
-        info.max_pos.extend_max(&target_pos);
 
         if moved {
             self.pos = target_pos;
