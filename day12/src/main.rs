@@ -5,6 +5,8 @@ extern crate primes;
 #[macro_use]
 extern crate itertools;
 
+// Perform repeated iterations on a single dimension until all the moons are back to their
+// original state in that dimension.
 fn simulate(moons: &[RefCell<MoonDimension>]) -> u64 {
     let moons = moons.to_owned();
     let initial_state = moons.clone();
@@ -18,6 +20,7 @@ fn simulate(moons: &[RefCell<MoonDimension>]) -> u64 {
     }
 }
 
+// Make a single step for all moons but in one dimension.
 fn perform_step(moons: &[RefCell<MoonDimension>]) {
     for this_moon_cell in moons {
         for other_moon_cell in moons {
@@ -54,6 +57,9 @@ fn apply_vel_change(moon_cell: &RefCell<MoonDimension>) {
 fn main() {
     let start_time = std::time::Instant::now();
 
+    // There's no relationship between the three dimensions - what happens in one is entirely
+    // independent of what happens in the other two.  We're going to make use of that to
+    // simulate them independently, so store them independently.
     let dimensions = vec![
         vec![
             RefCell::new(MoonDimension { pos: -10, vel: 0 }),
@@ -75,10 +81,11 @@ fn main() {
         ],
     ];
 
+    // We're going to mutate the data, so use a different copy for each part.
     let part_1_data = dimensions.clone();
     let part_2_data = dimensions;
 
-    // Part 1
+    // Part 1 - just perform a thousand iterations on the whole thing.
     for _ in 0..1_000 {
         for dimension in &part_1_data {
             perform_step(dimension);
@@ -89,12 +96,18 @@ fn main() {
         .map(Moon::total_energy)
         .sum();
 
-    // Part 2
-    let mut steps = Vec::new();
-    for dimension in &part_2_data {
-        steps.push(simulate(dimension));
-    }
-    let iterations_to_reset = lowest_common_multiple(steps);
+    // Part 2 - figure out how many steps required in each dimension to return to the initial
+    // state (the dimensions are independent, rememeber).  The total steps for a complete
+    // return to the initial state is then the lowest common multiple of the steps for each
+    // individual dimension.  Because the dimensions are independent, let's run the
+    // simulations on separate threads for a bit more juicy speed.
+    let threads = part_2_data.iter().map(move |dimension| {
+        let moved_dimension = dimension.to_vec();
+        std::thread::spawn(move || simulate(&moved_dimension))
+    }).collect::<Vec<_>>();
+
+    let steps = threads.into_iter().map(|thread| thread.join().unwrap()).collect::<Vec<_>>();
+    let iterations_to_reset = lowest_common_multiple(&steps);
 
     println!(
         "Part 1: {}\nPart 2: {}\nTime: {}ms",
@@ -104,6 +117,8 @@ fn main() {
     );
 }
 
+// It was better for part 2 to have dimensions containing moons. But part 1 wants moons containing
+// dimensions, so switch them round.
 fn transpose_data(data: &[Vec<RefCell<MoonDimension>>]) -> Vec<Moon> {
     izip!(data[0].clone(), data[1].clone(), data[2].clone())
         .map(|(x, y, z)| Moon {
@@ -114,13 +129,14 @@ fn transpose_data(data: &[Vec<RefCell<MoonDimension>>]) -> Vec<Moon> {
         .collect()
 }
 
-fn lowest_common_multiple(nums: Vec<u64>) -> u64 {
+// Yuck, maths.  Stole this.
+fn lowest_common_multiple(nums: &[u64]) -> u64 {
     let mut lcm = 1;
 
     let mut prime_factors = Vec::new();
     let mut unique_prime_factors = Vec::new();
     for num in nums {
-        let factors = primes::factors(num);
+        let factors = primes::factors(*num);
         unique_prime_factors.append(&mut factors.clone());
         prime_factors.push(factors);
     }
