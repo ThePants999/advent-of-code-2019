@@ -10,7 +10,7 @@ fn main() {
     
     let part_1_fuel: i32 = modules.iter().copied().map(|module| fuel_for_weight(module, false)).sum();
     let part_2_fuel: i32 = modules.iter().copied().map(|module| fuel_for_weight(module, true)).sum();
-    println!("Part 1: {}\nPart 2: {}\nTime: {}us", part_1_fuel, part_2_fuel, start_time.elapsed().as_micros()());
+    println!("Part 1: {}\nPart 2: {}\nTime: {}us", part_1_fuel, part_2_fuel, start_time.elapsed().as_micros());
 }
 
 fn load_modules() -> Result<Vec<i32>, io::Error> {
