@@ -4,7 +4,7 @@ const MAXIMUM_VALUE: u32 = 679_128;
 // I'm not _unhappy_ with this implementation, but it's simplistic.
 // You really want to look at AxlLind's:
 // https://github.com/AxlLind/AdventOfCode2019/blob/master/src/bin/04.rs
-// It's a thing of beauty, and runs in a tenth of the time of this code.
+// It's a thing of beauty, and runs in a fraction of the time of this code.
 // I'm not going to work on this further as I'd just be copying his.
 
 fn main() {
