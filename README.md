@@ -33,4 +33,4 @@ Running times (best quartile) on my machine:
 | 22  | 2         |
 | 23  |           |
 | 24  | 4         |
-| 25  |           |
+| 25  | N/A       |
