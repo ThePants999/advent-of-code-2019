@@ -32,5 +32,5 @@ Running times (best quartile) on my machine:
 | 21  | 11        |
 | 22  | 2         |
 | 23  |           |
-| 24  |           |
+| 24  | 4         |
 | 25  |           |
