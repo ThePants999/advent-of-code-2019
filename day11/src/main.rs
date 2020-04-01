@@ -29,7 +29,7 @@ fn main() {
 fn run_paint_sequence(program: &[i64], paint_current_panel: bool) -> Robot {
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
-    let mut computer = intcode::Computer::new(program, in_recv, out_send);
+    let mut computer = intcode::ChannelIOComputer::new(program, in_recv, out_send);
     std::thread::spawn(move || {
         computer.run();
     });

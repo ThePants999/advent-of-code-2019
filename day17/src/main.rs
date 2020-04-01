@@ -14,7 +14,7 @@ fn main() {
     });
 
     // Run the Intcode computer in camera mode to build a picture of the scaffold.
-    let picture = intcode::run_computer(&program, &[]);
+    let picture = intcode::run_parallel_computer(&program, &[]);
 
     // Parse the picture to generate a list of the intersections (needed for part 1) and a set
     // of movement instructions to follow it (needed for part 2).
@@ -46,7 +46,7 @@ fn main() {
 // the quantity of dust collected.
 fn move_robot(program: &[i64], logic: MovementLogic) -> i64 {
     let inputs = logic.into_intcode_inputs();
-    let outputs = intcode::run_computer(program, &inputs);
+    let outputs = intcode::run_parallel_computer(program, &inputs);
     let final_output = outputs.last().unwrap();
     assert!(*final_output > 255);
     *final_output

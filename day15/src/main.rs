@@ -19,7 +19,7 @@ fn main() {
 
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
-    let mut computer = intcode::Computer::new(&program, in_recv, out_send);
+    let mut computer = intcode::ChannelIOComputer::new(&program, in_recv, out_send);
     std::thread::spawn(move || { computer.run(); });
 
     // Firstly, use the droid (via the Intcode computer) to construct a map of the entire ship.

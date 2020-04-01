@@ -1,9 +1,23 @@
 //! # Intcode
 //!
 //! `intcode` is a library for executing Intcode programs, as featured in the Advent
-//! of Code 2019. To use this library, create a [`Computer`], which takes a program plus
-//! two channels, one for sending inputs in and one for receiving outputs.  Helper
-//! functions assist with loading programs from file, and executing them simplistically.
+//! of Code 2019.
+//! 
+//! This library offers two modes of operation, represented by the structs
+//! [`ChannelIOComputer`] and [`SynchronousComputer`].  Both take an Intcode program
+//! and will execute it, but differ in how they do so.
+//! 
+//! [`ChannelIOComputer`] is designed to run in its own thread, and communicates with
+//! your main thread using MPSC channels.  It will run continuously, and block waiting
+//! for input to be sent on its inbound channel if there isn't any waiting when the
+//! Intcode program requests some, with outputs being sent back on its outbound channel.
+//! 
+//! [`SynchronousComputer`] is designed to run on your main thread, and while you can
+//! provide it a set of inputs when you execute it, if it needs more after consuming
+//! those, it will return, and you'll need to call it again with further input(s).
+//! 
+//! Helper functions assist with loading programs from file, and executing them via
+//! [`ChannelIOComputer`]s.
 //!
 //! Typical usage might look like this:
 //!
@@ -13,21 +27,30 @@
 //!     process::exit(1);
 //! });
 //!
+//! // ChannelIOComputer
 //! let (in_send, in_recv) = std::sync::mpsc::channel();
 //! let (out_send, out_recv) = std::sync::mpsc::channel();
-//! let mut computer = intcode::Computer::new(&program, in_recv, out_send);
+//! let mut channel_comp = intcode::ChannelIOComputer::new(&program, in_recv, out_send);
 //! std::thread::spawn(move || {
-//!     computer.run().unwrap_or_else(|e| {
+//!     channel_comp.run().unwrap_or_else(|e| {
 //!         println!("Computer failed: {}", e);
 //!         process::exit(1);
 //!     });
 //! });
+//! 
+//! // The computer is now executing in parallel, and you can communicate with it
+//! // its channels.
+//! in_send.send(1).unwrap();
+//! println!("{}", out_recv.recv().unwrap());
+//! 
+//! // SynchronousComputer
+//! let mut sync_comp = intcode::SynchronousComputer::new(&program);
+//! let output = sync_comp.run(&[1]);
+//! println!("{}", output.outputs.first().unwrap());
 //! ```
 //!
-//! The computer is now executing in parallel, and you can communicate with it
-//! via `in_send` and `out_recv`.
-//!
-//! [`Computer`]: ./struct.Computer.html
+//! [`ChannelIOComputer`]: ./struct.ChannelIOComputer.html
+//! [`SynchronousComputer`]: ./struct.SynchronousComputer.html
 //!
 
 #![crate_name = "intcode"]
@@ -41,6 +64,172 @@ use std::fs::File;
 use std::io;
 use std::io::Read;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::collections::VecDeque;
+use std::iter::FromIterator;
+
+/// The result of running a `SynchronousComputer` as far as possible.
+#[derive(Clone,Copy,PartialEq,Eq)]
+pub enum SynchronousComputeResult {
+    /// The program has run to completion.
+    ProgramEnded,
+
+    /// The program has paused until you provide further input.
+    InputRequired,
+}
+
+/// Output from running a `SynchronousComputer` as far as possible.
+pub struct SynchronousComputeOutput {
+    /// The reason why execution has stopped.
+    pub result: SynchronousComputeResult,
+
+    /// The outputs that have been generated during this round of execution.
+    pub outputs: Vec<i64>,
+}
+
+/// A virtual computer whose memory contains an Intcode program and which can execute
+/// said program, where communication with the computer is via synchronous function
+/// calls.
+pub struct SynchronousComputer {
+    processor: Processor,
+    last_result: Option<SynchronousComputeResult>,
+}
+
+impl SynchronousComputer {
+    /// Construct a computer to run `program`.  `program` only needs to be as long as the
+    /// instructions and data contained within it; the computer has additional memory available
+    /// that the program can refer to.
+    #[must_use]
+    pub fn new(program: &[i64]) -> Self {
+        let processor = Processor::new(program);
+        Self { processor, last_result: None }
+    }
+
+    /// Executes the program in the computer's memory as far as possible, returning either when
+    /// the program completes or if an input is required when all the provided inputs have been
+    /// used up.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any problem is hit executing the program, which would indicate either that the
+    /// program is invalid, or that invalid inputs were provided to it.
+    pub fn run(&mut self, inputs: &[i64]) -> SynchronousComputeOutput {
+        let mut inputs = VecDeque::from_iter(inputs);
+        let mut outputs = Vec::new();
+
+        match self.last_result {
+            Some(SynchronousComputeResult::ProgramEnded) => return SynchronousComputeOutput {
+                result: SynchronousComputeResult::ProgramEnded,
+                outputs
+            },
+            Some(SynchronousComputeResult::InputRequired) if inputs.is_empty() => return SynchronousComputeOutput {
+                result: SynchronousComputeResult::InputRequired,
+                outputs
+            },
+            Some(SynchronousComputeResult::InputRequired) => self.processor.input_available(*inputs.pop_front().unwrap()),
+            _ => ()
+        }
+
+        let output = loop {
+            match self.processor.process() {
+                SingleOperationResult::Handled => (),
+                SingleOperationResult::InputRequired => {
+                    if let Some(input) = inputs.pop_front() {
+                        self.processor.input_available(*input);
+                    } else {
+                        break SynchronousComputeOutput {
+                            result: SynchronousComputeResult::InputRequired,
+                            outputs
+                        };
+                    }
+                },
+                SingleOperationResult::OutputAvailable(output) => outputs.push(output),
+                SingleOperationResult::ProgramEnded => break SynchronousComputeOutput {
+                    result: SynchronousComputeResult::ProgramEnded,
+                    outputs
+                }
+            }
+        };
+
+        self.last_result = Some(output.result);
+        output
+    }
+}
+
+/// A virtual computer whose memory contains an Intcode program and which can execute
+/// said program, where communication with the computer is via MPSC channels, and the
+/// computer is intended to be executed on its own thread.
+pub struct ChannelIOComputer {
+    processor: Processor,
+    in_channel: Receiver<i64>,
+    out_channel: Sender<i64>,
+}
+
+impl ChannelIOComputer {
+    /// Construct a computer to run `program`.  `program` only needs to be as long as the
+    /// instructions and data contained within it; the computer has additional memory available
+    /// that the program can refer to.
+    ///
+    /// `in_channel` is the receive half of a channel on which you can send runtime inputs to
+    /// the program, and `out_channel` is the send half of a channel on which you can receive
+    /// runtime outputs.
+    pub fn new(program: &[i64], in_channel: Receiver<i64>, out_channel: Sender<i64>) -> Self {
+        let processor = Processor::new(program);
+        Self {
+            processor,
+            in_channel,
+            out_channel,
+        }
+    }
+
+    /// Executes the program in the computer's memory.
+    ///
+    /// This will synchronously run the program through to completion on the current thread, but
+    /// may block waiting for input on the computer's input channel if sufficient inputs are not
+    /// pre-sent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any problem is hit executing the program, which would indicate either that the
+    /// program is invalid, or that invalid inputs were provided to it, or that the channels were
+    /// closed prematurely.
+    pub fn run(&mut self) {
+        loop {
+            match self.processor.process() {
+                SingleOperationResult::Handled => (),
+                SingleOperationResult::InputRequired => {
+                    let input = self.in_channel.recv().expect("Intcode computer expected an input but channel was closed!");
+                    self.processor.input_available(input);
+                },
+                SingleOperationResult::OutputAvailable(output) => self
+                    .out_channel
+                    .send(output)
+                    .expect("Intcode computer tried to send an output but channel was closed!"),
+                SingleOperationResult::ProgramEnded => break,
+            }
+        }
+    }
+
+    /// Returns the value currently stored at memory address zero.
+    /// 
+    /// This function shouldn't exist - Intcode programs should output anything that users
+    /// might need to get their hands on.  It exists solely for the purposes of day 2, where
+    /// we needed to get an output from the computer before the Output instruction was
+    /// introduced.  The fact that it specifically fetches address zero, rather than being
+    /// a generic function to read the computer's memory, is to reinforce that you're not
+    /// supposed to use it - the computer's memory is supposed to be private, and Input and
+    /// Output instructions are the communication channel.
+    pub fn fetch_address_zero(&self) -> i64 {
+        self.processor.memory[0]
+    }
+}
+
+// The result of executing a single operation on a computer.
+enum SingleOperationResult {
+    Handled,
+    ProgramEnded,
+    InputRequired,
+    OutputAvailable(i64),
+}
 
 // Operations that the Intcode computer can perform.
 #[derive(PartialEq, Eq)]
@@ -140,84 +329,87 @@ struct Operation {
     params: Parameters,
 }
 
-/// A virtual computer whose memory contains an Intcode program and which can execute
-/// said program.
-pub struct Computer {
+struct Processor {
     memory: Vec<i64>,
-    in_channel: Receiver<i64>,
-    out_channel: Sender<i64>,
     instruction_pointer: i64,
     relative_base: i64,
+    input_location: Option<i64>,
 }
 
-impl Computer {
-    /// Construct a computer to run `program`.  `program` only needs to be as long as the
-    /// instructions and data contained within it; the computer has additional memory available
-    /// that the program can refer to.
-    ///
-    /// `in_channel` is the receive half of a channel on which you can send runtime inputs to
-    /// the program, and `out_channel` is the send half of a channel on which you can receive
-    /// runtime outputs.
-    pub fn new(program: &[i64], in_channel: Receiver<i64>, out_channel: Sender<i64>) -> Self {
+impl Processor {
+    pub fn new(program: &[i64]) -> Self {
         Self {
             memory: program.into(),
-            in_channel,
-            out_channel,
             instruction_pointer: 0,
             relative_base: 0,
+            input_location: None,
         }
     }
 
-    /// Executes the program in the computer's memory.
-    ///
-    /// This will synchronously run the program through to completion on the current thread, but
-    /// may block waiting for input on the computer's input channel if sufficient inputs are not
-    /// pre-sent.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any problem is hit executing the program, which would indicate either that the
-    /// program is invalid, or that invalid inputs were provided to it, or that the channels were
-    /// closed prematurely.
-    pub fn run(&mut self) {
-        loop {
-            let operation = self.fetch_operation();
-            if operation.optype == OperationType::End {
-                break;
-            }
-            self.execute_operation(&operation);
+    // --- Interface to Computer ---
+
+    fn process(&mut self) -> SingleOperationResult {
+        let operation = self.fetch_operation();
+        self.execute_operation(&operation)
+    }
+
+    fn input_available(&mut self, input: i64) {
+        if let Some(location) = self.input_location {
+            self.set_at_address(location, input);
+            self.input_location = None;
+        } else {
+            // We could do better than this, storing a queue of inputs, but there's no need
+            // to by the current design.
+            panic!("Input provided twice consecutively");
         }
     }
 
-    // Execute a single operation that's been fully parsed from memory.
-    fn execute_operation(&mut self, op: &Operation) {
+    // --- Private methods ---
+
+    // Execute a single operation that's been fully parsed from memory and requires no I/O.
+    // -  Input should be fetched before calling this function, and stored in `op`.
+    // -  Output should be handled entirely without this function.
+    fn execute_operation(&mut self, op: &Operation) -> SingleOperationResult {
         match op.optype {
-            OperationType::Add => self.set_at_address(op.params.c, op.params.a + op.params.b),
-            OperationType::Multiply => self.set_at_address(op.params.c, op.params.a * op.params.b),
-            OperationType::Input => self.set_at_address(
-                op.params.a,
-                self.in_channel
-                    .recv()
-                    .expect("Intcode computer expected an input but channel was closed!"),
-            ),
-            OperationType::Output => self
-                .out_channel
-                .send(op.params.a)
-                .expect("Intcode computer tried to send an output but channel was closed!"),
+            OperationType::Add => {
+                self.set_at_address(op.params.c, op.params.a + op.params.b);
+                SingleOperationResult::Handled
+            },
+            OperationType::Multiply => { 
+                self.set_at_address(op.params.c, op.params.a * op.params.b);
+                SingleOperationResult::Handled
+            },
+            OperationType::Input => {
+                assert!(self.input_location.is_none());
+                self.input_location = Some(op.params.a);
+                SingleOperationResult::InputRequired
+            },
+            OperationType::Output => SingleOperationResult::OutputAvailable(op.params.a),
             OperationType::JumpIfTrue => {
                 if op.params.a != 0 {
                     self.instruction_pointer = op.params.b;
                 }
-            }
+                SingleOperationResult::Handled
+            },
             OperationType::JumpIfFalse => {
                 if op.params.a == 0 {
                     self.instruction_pointer = op.params.b;
                 }
+                SingleOperationResult::Handled
+            },
+            OperationType::LessThan => {
+                self.set_at_address(op.params.c, op.params.a < op.params.b);
+                SingleOperationResult::Handled
+            },
+            OperationType::Equals => {
+                self.set_at_address(op.params.c, op.params.a == op.params.b);
+                SingleOperationResult::Handled
             }
-            OperationType::LessThan => self.set_at_address(op.params.c, op.params.a < op.params.b),
-            OperationType::Equals => self.set_at_address(op.params.c, op.params.a == op.params.b),
-            OperationType::RelativeBaseOffset => self.relative_base += op.params.a,
-            OperationType::End => unreachable!(),
+            OperationType::RelativeBaseOffset => {
+                self.relative_base += op.params.a;
+                SingleOperationResult::Handled
+            },
+            OperationType::End => SingleOperationResult::ProgramEnded,
         }
     }
 
@@ -298,7 +490,7 @@ impl Computer {
 }
 
 /// Helper function for running an Intcode program (from file) that can run all the way to
-/// completion with a predetermined set of inputs (including no inputs).
+/// completion with a predetermined set of inputs (including no inputs), on its own thread.
 ///
 /// # Errors
 ///
@@ -310,17 +502,18 @@ impl Computer {
 /// Panics if the program is syntactically valid but semantically invalid.
 pub fn load_and_run_computer(path: &str, inputs: &[i64]) -> Result<Vec<i64>, String> {
     let program = load_program(path).map_err(|e| format!("{:?}", e))?;
-    Ok(run_computer(&program, inputs))
+    Ok(run_parallel_computer(&program, inputs))
 }
 
 /// Helper function for running an Intcode program that can run all the way to
-/// completion with a predetermined set of inputs (including no inputs).
+/// completion with a predetermined set of inputs (including no inputs), on its own
+/// thread.
 ///
 /// # Panics
 ///
 /// Panics if the supplied program is invalid.
 #[allow(clippy::must_use_candidate)]
-pub fn run_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
+pub fn run_parallel_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
     let (in_sender, in_receiver) = mpsc::channel();
     let (out_sender, out_receiver) = mpsc::channel();
 
@@ -328,7 +521,7 @@ pub fn run_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
         in_sender.send(*input).unwrap();
     }
 
-    Computer::new(&program, in_receiver, out_sender).run();
+    ChannelIOComputer::new(&program, in_receiver, out_sender).run();
 
     let mut outputs = Vec::new();
     while let Ok(output) = out_receiver.try_recv() {

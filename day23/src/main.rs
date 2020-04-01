@@ -1,115 +1,149 @@
-use std::sync::mpsc::{self, Sender, Receiver};
-use std::collections::HashMap;
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+
+use std::collections::{HashMap, VecDeque};
+use std::iter::FromIterator;
 
 use intcode;
 
 fn main() {
-    let memory = intcode::load_program("day23/input.txt").unwrap_or_else(|err| {
+    let start_time = std::time::Instant::now();
+
+    let program = intcode::load_program("day23/input.txt").unwrap_or_else(|err| {
         println!("Could not load input file!\n{:?}", err);
         std::process::exit(1);
     });
 
-    let mut map: HashMap<i64, Computer> = HashMap::new();
-    for address in 0..50 {
-        let computer = Computer::new(&memory, address);
-        map.insert(address, computer);
-    }
+    let network = Network::new(50, &program);
+    let (part_1_answer, part_2_answer) = network.run();
 
-    let mut idle_count = 0;
-    let mut previous_nat_packet: Option<Message> = None;
-    let mut nat_packet: Option<Message> = None;
-
-    let message = loop {
-        let mut queue = Vec::new();
-        for computer in map.values_mut() {
-            if let Some(msg) = computer.schedule() {
-                queue.push(msg);
-            }
-        }
-
-        if !queue.is_empty() {
-            idle_count = 0;
-        } else if idle_count < 50 {
-            idle_count += 1;
-        } else if nat_packet.is_some() {
-            // Idle, send NAT packet
-            let this = nat_packet.unwrap();
-            println!("Transmitting NAT packet ({}, {})", this.x, this.y);
-            if let Some(prev) = previous_nat_packet {
-                if prev.y == this.y { break this; }
-            }
-            map.get_mut(&0).unwrap().send(this.clone());
-            previous_nat_packet = Some(this);
-            nat_packet = None;
-        }
-
-        for msg in queue {
-            println!("Message to {}: ({}, {})", msg.destination, msg.x, msg.y);
-            if msg.destination == 255 {
-                nat_packet = Some(msg);
-                continue;
-            }
-            let target = map.get_mut(&msg.destination).unwrap();
-            target.send(msg);
-        }
-    };
-
-    println!("Repeated message to 255: {}, {}", message.x, message.y);
+    println!("Part 1: {}\nPart 2: {}\nTime: {}ms", part_1_answer, part_2_answer, start_time.elapsed().as_millis());
 }
 
-#[derive(Clone,Copy)]
 struct Message {
     destination: i64,
     x: i64,
     y: i64,
 }
 
-struct Computer {
-    tx: Sender<i64>,
-    rx: Receiver<i64>,
+#[derive(Default)]
+struct NAT {
+    stored_x: Option<i64>,
+    stored_y: i64,
 }
 
-impl Computer {
-    fn new(memory: &[i64], address: i64) -> Self {
-        //let (network_send, network_recv) = channel();
-        let (in_send, in_recv) = mpsc::channel();
-        let (out_send, out_recv) = mpsc::channel();
-        let mut computer = intcode::Computer::new(memory, in_recv, out_send);
-        std::thread::spawn(move || { computer.run(); });
+impl NAT {
+    fn new() -> Self {
+        Self::default()
+    }
 
-        in_send.send(address).unwrap();
+    fn push(&mut self, message: &Message) {
+        assert!(message.destination == 255);
+        self.stored_x = Some(message.x);
+        self.stored_y = message.y;
+    }
 
-        // thread::spawn(move || {
-        //     loop {
-        //         if let Ok(val) = network_recv.try_recv() {
-        //             in_send.send(val).unwrap();
-        //         } else {
-        //             in_send.send(-1).unwrap();
-        //         }
-        //     }
-        // });
-    
+    fn pop(&self) -> Option<Message> {
+        if let Some(x) = self.stored_x {
+            Some(Message { destination: 0, x, y: self.stored_y })
+        } else {
+            None
+        }
+    }
+}
+
+struct ComputerLink {
+    computer: intcode::SynchronousComputer,
+    outbound_messages: Vec<i64>,
+}
+
+impl ComputerLink {
+    // Create an Intcode computer and initialise its input queue with its address.
+    fn new(program: &[i64], address: i64) -> Self {
         Self {
-            tx: in_send, //network_send,
-            rx: out_recv,
+            computer: intcode::SynchronousComputer::new(program),
+            outbound_messages: vec![address],
         }
     }
+}
 
-    fn schedule(&mut self) -> Option<Message> {
-        self.tx.send(-1).unwrap();
+struct Network {
+    computers: HashMap<i64, ComputerLink>,
+    nat: NAT,
+}
 
-        match self.rx.try_recv() {
-            Ok(-1) | Err(_  )=> None,
-            Ok(dest) => Some(Message{
-                destination: dest,
-                x: self.rx.recv().unwrap(),
-                y: self.rx.recv().unwrap(),
-            }),
+impl Network {
+    fn new(num_computers: i64, computer_program: &[i64]) -> Self {
+        let mut computers = HashMap::with_capacity(num_computers as usize);
+        for i in 0..num_computers {
+            computers.insert(i, ComputerLink::new(computer_program, i));
         }
+
+        Self { computers, nat: NAT::new() }
     }
 
-    fn send(&mut self, msg: Message) {
-        self.tx.send(msg.x).unwrap();
-        self.tx.send(msg.y).unwrap();
+    fn run(mut self) -> (i64, i64) {
+        let mut first_y = None;
+        let mut last_sent_y = None;
+
+        loop {
+            let mut outputs = Vec::new();
+
+            // Transmit to and receive from every computer.  We'll transmit everything that's
+            // queued, and if that's "nothing", transmit -1.
+            for link in self.computers.values_mut() {
+                if link.outbound_messages.is_empty() {
+                    link.outbound_messages.push(-1);
+                }
+                let inputs: Vec<i64> = link.outbound_messages.drain(..).collect();
+                let mut compute_output = link.computer.run(&inputs);
+                assert!(compute_output.result == intcode::SynchronousComputeResult::InputRequired);
+
+                // Gather all of the outputs together.
+                outputs.append(&mut compute_output.outputs);
+            }
+
+            if outputs.is_empty() {
+                // No computer had any output for us - poke the NAT.
+                let message = self.nat.pop();
+                if let Some(message) = message {
+                    if let Some(last_y) = last_sent_y {
+                        if last_y == message.y {
+                            // Found the answer to part 2
+                            break;
+                        }
+                    }
+                    last_sent_y = Some(message.y);
+
+                    outputs.push(message.destination);
+                    outputs.push(message.x);
+                    outputs.push(message.y);    
+                }
+            }
+
+            let mut queue = VecDeque::from_iter(outputs);
+            while !queue.is_empty() {
+                let destination = queue.pop_front().unwrap();
+                let x = queue.pop_front().unwrap();
+                let y = queue.pop_front().unwrap();
+                if destination == 255 {
+                    // Send to the NAT.
+                    if first_y.is_none() {
+                        // Got the answer to part 1.
+                        first_y = Some(y);
+                    }
+                    self.nat.push(&Message { destination: 255, x, y });                    
+                } else {
+                    // Send to another computer.
+                    let link = self.computers.get_mut(&destination).unwrap();
+                    link.outbound_messages.push(x);
+                    link.outbound_messages.push(y);
+                }
+            }
+        }
+
+        (first_y.unwrap(), last_sent_y.unwrap())
     }
 }

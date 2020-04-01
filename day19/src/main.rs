@@ -87,7 +87,7 @@ fn point_affected(x: i64, y: i64) -> bool {
             });
     }
 
-    let outputs = intcode::run_computer(&PROGRAM, &[x, y]);
+    let outputs = intcode::run_parallel_computer(&PROGRAM, &[x, y]);
     outputs[0] == 1
 }
 

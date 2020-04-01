@@ -55,7 +55,7 @@ fn main() {
 fn run_program(intcode: &[i64], springscript: &str) -> i64 {
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
-    let mut computer = intcode::Computer::new(&intcode, in_recv, out_send);
+    let mut computer = intcode::ChannelIOComputer::new(&intcode, in_recv, out_send);
     std::thread::spawn(move || {
         computer.run();
     });

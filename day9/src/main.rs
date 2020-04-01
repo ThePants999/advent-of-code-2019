@@ -8,8 +8,8 @@ fn main() {
         std::process::exit(1);
     });
 
-    let outputs_part_1 = intcode::run_computer(&program, &[1]);
-    let outputs_part_2 = intcode::run_computer(&program, &[2]);
+    let outputs_part_1 = intcode::run_parallel_computer(&program, &[1]);
+    let outputs_part_2 = intcode::run_parallel_computer(&program, &[2]);
 
     println!(
         "Part 1: {}\nPart 2: {}\nTime: {}ms",

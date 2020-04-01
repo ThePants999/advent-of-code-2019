@@ -18,7 +18,7 @@ fn main() {
     // Part 1. Run the computer as provided - it just outputs a single screen and then exits.  We
     // just want to know the number of block tiles, so we skip all the X and Y coordinates, and
     // see how many tiles are type 2 (block).
-    let outputs_part_1 = intcode::run_computer(&program, &[]);
+    let outputs_part_1 = intcode::run_parallel_computer(&program, &[]);
     let blocks = outputs_part_1
         .iter()
         .skip(2)
@@ -31,7 +31,7 @@ fn main() {
     program[0] = 2;
     let (in_send, in_recv) = mpsc::channel();
     let (out_send, out_recv) = mpsc::channel();
-    let mut computer = intcode::Computer::new(&program, in_recv, out_send);
+    let mut computer = intcode::ChannelIOComputer::new(&program, in_recv, out_send);
     std::thread::spawn(move || { computer.run(); });
 
     // We're still going to ignore most of what the computer is telling us, though. There's some

@@ -52,7 +52,7 @@ fn run_amplifier_non_feedback_sequence(program: &[i64], sequence: &[i64]) -> i64
     let mut input = 0;
     for phase_setting in sequence {
         let inputs = vec![*phase_setting, input];
-        let outputs = intcode::run_computer(program, &inputs);
+        let outputs = intcode::run_parallel_computer(program, &inputs);
         input = outputs[0];
     }
     input
@@ -78,7 +78,7 @@ fn run_amplifier_feedback_sequence(program: &[i64], sequence: &[i64]) -> i64 {
     for phase_setting in sequence {
         let (new_send, new_recv) = mpsc::channel();
         new_send.send(phase_setting).unwrap();
-        let mut computer = intcode::Computer::new(program, link_recv, new_send);
+        let mut computer = intcode::ChannelIOComputer::new(program, link_recv, new_send);
         std::thread::spawn(move || { computer.run(); });
         link_recv = new_recv;
     }
