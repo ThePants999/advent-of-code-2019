@@ -5,7 +5,7 @@ My style prioritises being easy to follow, understand and reason about.  So you'
 ## Current status
 Everything's as good as I'm planning to make it. Most days are worth looking at, but I'd skip days 18 and 20 where I haven't learned enough graph theory to write a performant solution, and day 25 is just I/O between the Intcode computer and human user, no automated gameplay. Aside from those three days, everything runs in under half a second _total_ - go Rust!
 
-I am planning, though, to have a go at reworking day 23 to use async/await, for educational purposes.
+The Intcode computer now features three modes of operation: concurrent, synchronous, and async. Most Intcode days use concurrent, while day 23 demonstrates synchronous, and day 5 has a really noddy use of async. I am planning, though, to have a go at reworking day 23 to use async, for educational purposes.
 
 Running times (best quartile) on my machine:
 

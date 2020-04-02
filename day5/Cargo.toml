@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 intcode = { path = "../intcode" }
+tokio = { version = "0.2", features = ["rt-core", "macros"] }

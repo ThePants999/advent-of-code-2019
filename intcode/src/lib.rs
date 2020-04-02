@@ -3,21 +3,28 @@
 //! `intcode` is a library for executing Intcode programs, as featured in the Advent
 //! of Code 2019.
 //! 
-//! This library offers two modes of operation, represented by the structs
-//! [`ChannelIOComputer`] and [`SynchronousComputer`].  Both take an Intcode program
-//! and will execute it, but differ in how they do so.
+//! This library offers three modes of operation, represented by the structs
+//! [`ChannelIOComputer`], [`StreamingIOComputer`] and [`SynchronousComputer`].  All
+//! three take an Intcode program and will execute it, but differ in how they do so.
 //! 
 //! [`ChannelIOComputer`] is designed to run in its own thread, and communicates with
 //! your main thread using MPSC channels.  It will run continuously, and block waiting
 //! for input to be sent on its inbound channel if there isn't any waiting when the
 //! Intcode program requests some, with outputs being sent back on its outbound channel.
 //! 
+//! [`StreamingIOComputer`] is designed to run in a Tokio reactor, and communicates with
+//! your code using Tokio MPSC streams.  It works with async code, and will run
+//! continuously but lazily as required by your `await` calls.  `await` will block
+//! forever if the computer can't get enough inputs, so make sure that you've either
+//! sent enough on the inbound stream before `await`ing, or you've got appropriate
+//! futures chaining so that enough inputs will be sent during execution.
+//! 
 //! [`SynchronousComputer`] is designed to run on your main thread, and while you can
 //! provide it a set of inputs when you execute it, if it needs more after consuming
 //! those, it will return, and you'll need to call it again with further input(s).
 //! 
 //! Helper functions assist with loading programs from file, and executing them via
-//! [`ChannelIOComputer`]s.
+//! [`ChannelIOComputer`]s or [`StreamingIOComputer`]s.
 //!
 //! Typical usage might look like this:
 //!
@@ -39,9 +46,21 @@
 //! });
 //! 
 //! // The computer is now executing in parallel, and you can communicate with it
-//! // its channels.
+//! // via its channels.
 //! in_send.send(1).unwrap();
 //! println!("{}", out_recv.recv().unwrap());
+//! 
+//! // StreamingIOComputer
+//! let (in_send, in_recv) = tokio::sync::mpsc::unbounded_channel();
+//! let (out_send, out_recv) = tokio::sync::mpsc::unbounded_channel();
+//! tokio::spawn(async move {
+//!     intcode::StreamingIOComputer::new(&program, in_recv, out_send).run().await;
+//! });
+//! 
+//! // The computer is now executing on the Tokio runtime, and you can communicate
+//! // with it via its streams.
+//! in_send.send(1).unwrap();
+//! println!("{}", out_recv.recv().await.unwrap());
 //! 
 //! // SynchronousComputer
 //! let mut sync_comp = intcode::SynchronousComputer::new(&program);
@@ -50,6 +69,7 @@
 //! ```
 //!
 //! [`ChannelIOComputer`]: ./struct.ChannelIOComputer.html
+//! [`StreamingIOComputer`]: ./struct.StreamingIOComputer.html
 //! [`SynchronousComputer`]: ./struct.SynchronousComputer.html
 //!
 
@@ -66,6 +86,10 @@ use std::io::Read;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::collections::VecDeque;
 use std::iter::FromIterator;
+
+extern crate tokio;
+use tokio::stream::StreamExt;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender, UnboundedReceiver};
 
 /// The result of running a `SynchronousComputer` as far as possible.
 #[derive(Clone,Copy,PartialEq,Eq)]
@@ -154,6 +178,60 @@ impl SynchronousComputer {
         output
     }
 }
+
+/// A virtual computer whose memory contains an Intcode program and which can execute
+/// said program, where communication with the computer is via Tokio MPSC streams, and
+/// the computer is intended to be executed on a Tokio reactor.
+pub struct StreamingIOComputer {
+    processor: Processor,
+    in_stream: UnboundedReceiver<i64>,
+    out_stream: UnboundedSender<i64>,
+}
+
+impl StreamingIOComputer {
+    /// Construct a computer to run `program`.  `program` only needs to be as long as the
+    /// instructions and data contained within it; the computer has additional memory available
+    /// that the program can refer to.
+    ///
+    /// `in_channel` is the receive half of a stream on which you can send runtime inputs to
+    /// the program, and `out_channel` is the send half of a stream on which you can receive
+    /// runtime outputs.
+    #[must_use]
+    pub fn new(program: &[i64], in_stream: UnboundedReceiver<i64>, out_stream: UnboundedSender<i64>) -> Self {
+        Self {
+            processor: Processor::new(program),
+            in_stream,
+            out_stream,
+        }
+    }
+
+    /// Executes the program in the computer's memory.
+    ///
+    /// This is an async function which will run the program through to completion, but may
+    /// `await` input on the inbound stream if sufficient inputs are not pre-sent.  Typically
+    /// you would spawn this function onto a Tokio reactor.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any problem is hit executing the program, which would indicate either that the
+    /// program is invalid, or that invalid inputs were provided to it, or that the streams were
+    /// closed prematurely.
+    pub async fn run(&mut self) {
+        loop {
+            match self.processor.process() {
+                SingleOperationResult::Handled => (),
+                SingleOperationResult::InputRequired => {
+                    let input = self.in_stream.next().await.expect("Intcode computer expected an input but channel was closed!");
+                    self.processor.input_available(input);
+                },
+                SingleOperationResult::OutputAvailable(output) => self
+                    .out_stream
+                    .send(output)
+                    .expect("Intcode computer tried to send an output but channel was closed!"),
+                SingleOperationResult::ProgramEnded => break,
+            }
+        }
+    }}
 
 /// A virtual computer whose memory contains an Intcode program and which can execute
 /// said program, where communication with the computer is via MPSC channels, and the
@@ -334,6 +412,7 @@ struct Processor {
     instruction_pointer: i64,
     relative_base: i64,
     input_location: Option<i64>,
+    stored_inputs: VecDeque<i64>,
 }
 
 impl Processor {
@@ -343,6 +422,7 @@ impl Processor {
             instruction_pointer: 0,
             relative_base: 0,
             input_location: None,
+            stored_inputs: VecDeque::new(),
         }
     }
 
@@ -355,12 +435,13 @@ impl Processor {
 
     fn input_available(&mut self, input: i64) {
         if let Some(location) = self.input_location {
+            // We've previously evaluated an Input operation when we had no input available,
+            // so execute that operation with this input.
             self.set_at_address(location, input);
             self.input_location = None;
         } else {
-            // We could do better than this, storing a queue of inputs, but there's no need
-            // to by the current design.
-            panic!("Input provided twice consecutively");
+            // The program hasn't requested this input yet, so store it.
+            self.stored_inputs.push_back(input);
         }
     }
 
@@ -380,9 +461,14 @@ impl Processor {
                 SingleOperationResult::Handled
             },
             OperationType::Input => {
-                assert!(self.input_location.is_none());
-                self.input_location = Some(op.params.a);
-                SingleOperationResult::InputRequired
+                if let Some(input) = self.stored_inputs.pop_front() {
+                    self.set_at_address(op.params.a, input);
+                    SingleOperationResult::Handled
+                } else {
+                    assert!(self.input_location.is_none());
+                    self.input_location = Some(op.params.a);
+                    SingleOperationResult::InputRequired    
+                }
             },
             OperationType::Output => SingleOperationResult::OutputAvailable(op.params.a),
             OperationType::JumpIfTrue => {
@@ -525,6 +611,30 @@ pub fn run_parallel_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
 
     let mut outputs = Vec::new();
     while let Ok(output) = out_receiver.try_recv() {
+        outputs.push(output);
+    }
+    outputs
+}
+
+/// Helper function for running an Intcode program that can run all the way to
+/// completion with a predetermined set of inputs (including no inputs), on a
+/// futures executor (e.g. a Tokio reactor).
+///
+/// # Panics
+///
+/// Panics if the supplied program is invalid.
+pub async fn run_async_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
+    let (in_sender, in_receiver) = unbounded_channel();
+    let (out_sender, mut out_receiver) = unbounded_channel();
+
+    for input in inputs {
+        in_sender.send(*input).unwrap();
+    }
+
+    StreamingIOComputer::new(&program, in_receiver, out_sender).run().await;
+
+    let mut outputs = Vec::new();
+    while let Some(output) = out_receiver.recv().await {
         outputs.push(output);
     }
     outputs
