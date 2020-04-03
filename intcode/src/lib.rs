@@ -2,27 +2,27 @@
 //!
 //! `intcode` is a library for executing Intcode programs, as featured in the Advent
 //! of Code 2019.
-//! 
+//!
 //! This library offers three modes of operation, represented by the structs
 //! [`ChannelIOComputer`], [`StreamingIOComputer`] and [`SynchronousComputer`].  All
 //! three take an Intcode program and will execute it, but differ in how they do so.
-//! 
+//!
 //! [`ChannelIOComputer`] is designed to run in its own thread, and communicates with
 //! your main thread using MPSC channels.  It will run continuously, and block waiting
 //! for input to be sent on its inbound channel if there isn't any waiting when the
 //! Intcode program requests some, with outputs being sent back on its outbound channel.
-//! 
+//!
 //! [`StreamingIOComputer`] is designed to run in a Tokio reactor, and communicates with
 //! your code using Tokio MPSC streams.  It works with async code, and will run
 //! continuously but lazily as required by your `await` calls.  `await` will block
 //! forever if the computer can't get enough inputs, so make sure that you've either
 //! sent enough on the inbound stream before `await`ing, or you've got appropriate
 //! futures chaining so that enough inputs will be sent during execution.
-//! 
+//!
 //! [`SynchronousComputer`] is designed to run on your main thread, and while you can
 //! provide it a set of inputs when you execute it, if it needs more after consuming
 //! those, it will return, and you'll need to call it again with further input(s).
-//! 
+//!
 //! Helper functions assist with loading programs from file, and executing them via
 //! [`ChannelIOComputer`]s or [`StreamingIOComputer`]s.
 //!
@@ -44,24 +44,24 @@
 //!         process::exit(1);
 //!     });
 //! });
-//! 
+//!
 //! // The computer is now executing in parallel, and you can communicate with it
 //! // via its channels.
 //! in_send.send(1).unwrap();
 //! println!("{}", out_recv.recv().unwrap());
-//! 
+//!
 //! // StreamingIOComputer
 //! let (in_send, in_recv) = tokio::sync::mpsc::unbounded_channel();
 //! let (out_send, out_recv) = tokio::sync::mpsc::unbounded_channel();
 //! tokio::spawn(async move {
 //!     intcode::StreamingIOComputer::new(&program, in_recv, out_send).run().await;
 //! });
-//! 
+//!
 //! // The computer is now executing on the Tokio runtime, and you can communicate
 //! // with it via its streams.
 //! in_send.send(1).unwrap();
 //! println!("{}", out_recv.recv().await.unwrap());
-//! 
+//!
 //! // SynchronousComputer
 //! let mut sync_comp = intcode::SynchronousComputer::new(&program);
 //! let output = sync_comp.run(&[1]);
@@ -80,19 +80,19 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io;
 use std::io::Read;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::collections::VecDeque;
 use std::iter::FromIterator;
+use std::sync::mpsc::{self, Receiver, Sender};
 
 extern crate tokio;
 use tokio::stream::StreamExt;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender, UnboundedReceiver};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 /// The result of running a `SynchronousComputer` as far as possible.
-#[derive(Clone,Copy,PartialEq,Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SynchronousComputeResult {
     /// The program has run to completion.
     ProgramEnded,
@@ -125,7 +125,10 @@ impl SynchronousComputer {
     #[must_use]
     pub fn new(program: &[i64]) -> Self {
         let processor = Processor::new(program);
-        Self { processor, last_result: None }
+        Self {
+            processor,
+            last_result: None,
+        }
     }
 
     /// Executes the program in the computer's memory as far as possible, returning either when
@@ -141,16 +144,22 @@ impl SynchronousComputer {
         let mut outputs = Vec::new();
 
         match self.last_result {
-            Some(SynchronousComputeResult::ProgramEnded) => return SynchronousComputeOutput {
-                result: SynchronousComputeResult::ProgramEnded,
-                outputs
-            },
-            Some(SynchronousComputeResult::InputRequired) if inputs.is_empty() => return SynchronousComputeOutput {
-                result: SynchronousComputeResult::InputRequired,
-                outputs
-            },
-            Some(SynchronousComputeResult::InputRequired) => self.processor.input_available(*inputs.pop_front().unwrap()),
-            _ => ()
+            Some(SynchronousComputeResult::ProgramEnded) => {
+                return SynchronousComputeOutput {
+                    result: SynchronousComputeResult::ProgramEnded,
+                    outputs,
+                }
+            }
+            Some(SynchronousComputeResult::InputRequired) if inputs.is_empty() => {
+                return SynchronousComputeOutput {
+                    result: SynchronousComputeResult::InputRequired,
+                    outputs,
+                }
+            }
+            Some(SynchronousComputeResult::InputRequired) => {
+                self.processor.input_available(*inputs.pop_front().unwrap())
+            }
+            _ => (),
         }
 
         let output = loop {
@@ -162,14 +171,16 @@ impl SynchronousComputer {
                     } else {
                         break SynchronousComputeOutput {
                             result: SynchronousComputeResult::InputRequired,
-                            outputs
+                            outputs,
                         };
                     }
-                },
+                }
                 SingleOperationResult::OutputAvailable(output) => outputs.push(output),
-                SingleOperationResult::ProgramEnded => break SynchronousComputeOutput {
-                    result: SynchronousComputeResult::ProgramEnded,
-                    outputs
+                SingleOperationResult::ProgramEnded => {
+                    break SynchronousComputeOutput {
+                        result: SynchronousComputeResult::ProgramEnded,
+                        outputs,
+                    }
                 }
             }
         };
@@ -179,13 +190,28 @@ impl SynchronousComputer {
     }
 }
 
+/// `StreamingIOComputer`s send these on their output stream to keep you informed of
+/// what's happening in the computer.
+#[derive(Debug)]
+pub enum AsyncComputeNotification {
+    /// The computer has generated an output.
+    Output(i64),
+
+    /// The computer has paused waiting for input.  (Of course, with the nature of async
+    /// code, if you've sent one recently, it may satisfy this demand!)
+    InputRequired,
+
+    /// The program has reached a successful conclusion.
+    ProgramEnded,
+}
+
 /// A virtual computer whose memory contains an Intcode program and which can execute
 /// said program, where communication with the computer is via Tokio MPSC streams, and
 /// the computer is intended to be executed on a Tokio reactor.
 pub struct StreamingIOComputer {
     processor: Processor,
     in_stream: UnboundedReceiver<i64>,
-    out_stream: UnboundedSender<i64>,
+    out_stream: UnboundedSender<AsyncComputeNotification>,
 }
 
 impl StreamingIOComputer {
@@ -197,7 +223,11 @@ impl StreamingIOComputer {
     /// the program, and `out_channel` is the send half of a stream on which you can receive
     /// runtime outputs.
     #[must_use]
-    pub fn new(program: &[i64], in_stream: UnboundedReceiver<i64>, out_stream: UnboundedSender<i64>) -> Self {
+    pub fn new(
+        program: &[i64],
+        in_stream: UnboundedReceiver<i64>,
+        out_stream: UnboundedSender<AsyncComputeNotification>,
+    ) -> Self {
         Self {
             processor: Processor::new(program),
             in_stream,
@@ -221,17 +251,30 @@ impl StreamingIOComputer {
             match self.processor.process() {
                 SingleOperationResult::Handled => (),
                 SingleOperationResult::InputRequired => {
-                    let input = self.in_stream.next().await.expect("Intcode computer expected an input but channel was closed!");
+                    self.out_stream
+                        .send(AsyncComputeNotification::InputRequired)
+                        .expect("Intcode computer tried to send an output but channel was closed!");
+                    let input = self
+                        .in_stream
+                        .next()
+                        .await
+                        .expect("Intcode computer expected an input but channel was closed!");
                     self.processor.input_available(input);
-                },
+                }
                 SingleOperationResult::OutputAvailable(output) => self
                     .out_stream
-                    .send(output)
+                    .send(AsyncComputeNotification::Output(output))
                     .expect("Intcode computer tried to send an output but channel was closed!"),
-                SingleOperationResult::ProgramEnded => break,
+                SingleOperationResult::ProgramEnded => {
+                    self.out_stream
+                        .send(AsyncComputeNotification::ProgramEnded)
+                        .expect("Intcode computer tried to send an output but channel was closed!");
+                    break;
+                }
             }
         }
-    }}
+    }
+}
 
 /// A virtual computer whose memory contains an Intcode program and which can execute
 /// said program, where communication with the computer is via MPSC channels, and the
@@ -275,9 +318,12 @@ impl ChannelIOComputer {
             match self.processor.process() {
                 SingleOperationResult::Handled => (),
                 SingleOperationResult::InputRequired => {
-                    let input = self.in_channel.recv().expect("Intcode computer expected an input but channel was closed!");
+                    let input = self
+                        .in_channel
+                        .recv()
+                        .expect("Intcode computer expected an input but channel was closed!");
                     self.processor.input_available(input);
-                },
+                }
                 SingleOperationResult::OutputAvailable(output) => self
                     .out_channel
                     .send(output)
@@ -288,7 +334,7 @@ impl ChannelIOComputer {
     }
 
     /// Returns the value currently stored at memory address zero.
-    /// 
+    ///
     /// This function shouldn't exist - Intcode programs should output anything that users
     /// might need to get their hands on.  It exists solely for the purposes of day 2, where
     /// we needed to get an output from the computer before the Output instruction was
@@ -455,11 +501,11 @@ impl Processor {
             OperationType::Add => {
                 self.set_at_address(op.params.c, op.params.a + op.params.b);
                 SingleOperationResult::Handled
-            },
-            OperationType::Multiply => { 
+            }
+            OperationType::Multiply => {
                 self.set_at_address(op.params.c, op.params.a * op.params.b);
                 SingleOperationResult::Handled
-            },
+            }
             OperationType::Input => {
                 if let Some(input) = self.stored_inputs.pop_front() {
                     self.set_at_address(op.params.a, input);
@@ -467,26 +513,26 @@ impl Processor {
                 } else {
                     assert!(self.input_location.is_none());
                     self.input_location = Some(op.params.a);
-                    SingleOperationResult::InputRequired    
+                    SingleOperationResult::InputRequired
                 }
-            },
+            }
             OperationType::Output => SingleOperationResult::OutputAvailable(op.params.a),
             OperationType::JumpIfTrue => {
                 if op.params.a != 0 {
                     self.instruction_pointer = op.params.b;
                 }
                 SingleOperationResult::Handled
-            },
+            }
             OperationType::JumpIfFalse => {
                 if op.params.a == 0 {
                     self.instruction_pointer = op.params.b;
                 }
                 SingleOperationResult::Handled
-            },
+            }
             OperationType::LessThan => {
                 self.set_at_address(op.params.c, op.params.a < op.params.b);
                 SingleOperationResult::Handled
-            },
+            }
             OperationType::Equals => {
                 self.set_at_address(op.params.c, op.params.a == op.params.b);
                 SingleOperationResult::Handled
@@ -494,7 +540,7 @@ impl Processor {
             OperationType::RelativeBaseOffset => {
                 self.relative_base += op.params.a;
                 SingleOperationResult::Handled
-            },
+            }
             OperationType::End => SingleOperationResult::ProgramEnded,
         }
     }
@@ -544,8 +590,8 @@ impl Processor {
             (self.fetch_write_parameter(1), 0, 0)
         } else {
             // For simplicity, we'll fetch the maximum three parameters following the instruction.
-            // Some operation types don't have three parameters, in which case we'll have parsed 
-            // the following instruction as a parameter to this one, but `execute_operation` will 
+            // Some operation types don't have three parameters, in which case we'll have parsed
+            // the following instruction as a parameter to this one, but `execute_operation` will
             // ignore "parameters" it doesn't need so that's not an issue.
             (
                 self.fetch_read_parameter(1),
@@ -622,22 +668,25 @@ pub fn run_parallel_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
 ///
 /// # Panics
 ///
-/// Panics if the supplied program is invalid.
+/// Panics if the supplied program is invalid, or if insufficient inputs were
+/// provided to run it to completion.
 pub async fn run_async_computer(program: &[i64], inputs: &[i64]) -> Vec<i64> {
     let (in_sender, in_receiver) = unbounded_channel();
-    let (out_sender, mut out_receiver) = unbounded_channel();
+    let (out_sender, out_receiver) = unbounded_channel();
 
     for input in inputs {
         in_sender.send(*input).unwrap();
     }
 
-    StreamingIOComputer::new(&program, in_receiver, out_sender).run().await;
+    StreamingIOComputer::new(&program, in_receiver, out_sender)
+        .run()
+        .await;
 
-    let mut outputs = Vec::new();
-    while let Some(output) = out_receiver.recv().await {
-        outputs.push(output);
-    }
-    outputs
+    out_receiver.filter_map(|notification| match notification {
+        AsyncComputeNotification::InputRequired => panic!("Insufficient inputs given to program!"),
+        AsyncComputeNotification::ProgramEnded => None,
+        AsyncComputeNotification::Output(output) => Some(output),
+    }).collect().await
 }
 
 /// Loads an Intcode program from the file at `path`.
